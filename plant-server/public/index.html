@@ -1,0 +1,164 @@
+<!doctype html>
+<html>
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>HPCI Toolkit</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="https://cdn.jsdelivr.net/npm/p5@1.9.4/lib/p5.min.js"></script>
+  <script src="mermaid.min.js"></script>
+</head>
+
+<body>
+  <h1>🌿 HPCI Toolkit</h1>
+  <<div id="promptBox" style="display:none; background:#f6eee8; border:1px solid #e3cdbd;
+       border-radius:12px; padding:14px; margin-bottom:12px;"></div>
+       
+  <!-- VIEW 1: login -->
+  <div id="loginView" class="view active">
+    <p class="muted">Enter your name to begin.</p>
+    <input id="nameInput" placeholder="your name">
+    <button onclick="login()">Continue</button>
+  </div>
+
+  <!-- VIEW 2: devices -->
+  <div id="devicesView" class="view">
+    <p class="muted">Signed in as <strong id="whoami"></strong></p>
+    <button id="ritualsBtn" onclick="openRituals()">Rituals →</button>
+    <h2>Your devices</h2>
+    <div id="deviceList"></div>
+    <h2>Add a device</h2>
+    <input id="newDeviceId" placeholder="device id, e.g. esp32-bme">
+    <input id="newDeviceName" placeholder="a nickname">
+    <button onclick="subscribe()">Subscribe</button>
+  </div>
+
+  <!-- VIEW 3: one device, live -->
+  <div id="deviceView" class="view">
+    <button class="back" onclick="goBack()">← back to devices</button>
+    <h2 id="deviceTitle"></h2>
+    <button onclick="openSetup()">⚙ Setup</button>
+
+    <div id="deviceSetupPrompt" style="display:none">
+      <p class="muted">This device isn't set up yet. Tap Setup to add its sensors and outputs.</p>
+    </div>
+
+    <div id="deviceLiveBits">
+      <select id="sensorPicker" onchange="onSensorChange()"></select>
+      <p class="bigval"><span id="currentValue">—</span></p>
+      <div id="canvasHolder"></div>
+      <h3>Light</h3>
+      <div id="outputControl"></div>
+    </div>
+  </div>
+
+  <!-- VIEW 4: setup -->
+  <div id="setupView" class="view">
+    <button class="back" onclick="goBackToDevice()">← back</button>
+    <h2>Setup: <span id="setupTitle"></span></h2>
+
+    <h3>On this board</h3>
+    <div id="configList"></div>
+
+    <h3>Add a sensor</h3>
+    <select id="catalogPicker"></select>
+    <button onclick="addSensor()">Add</button>
+    <p id="setupMessage" class="muted"></p>
+
+    <h3>Outputs on this board</h3>
+    <div id="outputList"></div>
+    <h3>Add an output</h3>
+    <select id="outputPicker"></select>
+    <button onclick="addOutput()">Add</button>
+  </div>
+
+  <!-- VIEW 5: rituals -->
+  <div id="ritualsView" class="view">
+    <button class="back" onclick="showView('devicesView')">← back</button>
+    <h2>Rituals</h2>
+
+    <div id="nowSection"></div>
+
+    <div class="section">
+      <button onclick="openBuilder()">+ New ritual</button>
+    </div>
+
+    <div class="section">
+      <div class="section-title">Your rituals</div>
+      <div id="ritualDefs"></div>
+      <div id="ritualPager" style="margin-top:10px; display:flex; align-items:center; gap:12px;"></div>
+    </div>
+    
+    <div class="section">
+      <div class="section-title">Past runs</div>
+      <div id="runList"></div>
+      <div id="runPager" style="margin-top:10px; display:flex; align-items:center; gap:12px;"></div>
+    </div>
+  </div>
+
+  <!-- VIEW 6: ritual builder -->
+  <div id="builderView" class="view">
+    <button class="back" onclick="showView('ritualsView')">← back</button>
+    <h2>New ritual</h2>
+
+    <label>Name</label>
+    <input id="ritualNameInput" placeholder="Morning check">
+
+    <h3>Which plants does this ritual use?</h3>
+    <div id="deviceRoles"></div>
+    <button onclick="confirmDevices()">Confirm devices</button>
+    <p id="builderMessage" class="muted"></p>
+
+    <hr>
+    <h3>Steps</h3>
+    <div id="stepList"></div>
+    <div class="row">
+      <select id="newStepType">
+        <option value="say">say (tell the human)</option>
+        <option value="ask">ask (question)</option>
+        <option value="wait">wait</option>
+        <option value="act">act (drive output)</option>
+        <option value="sense">sense (check a value)</option>
+      </select>
+      <button onclick="addStep()">+ add step</button>
+    </div>
+
+    <div class="save-bar">
+      <button onclick="saveRitual()">Validate &amp; Save ritual</button>
+      <span id="saveMessage" class="muted"></span>
+    </div>
+  </div>
+
+  <!-- VIEW 7: one run's full conversation -->
+  <div id="transcriptView" class="view">
+    <button class="back" onclick="showView('ritualsView')">← back to rituals</button>
+    <h2 id="transcriptTitle"></h2>
+    <p id="transcriptStatus" class="muted"></p>
+    <div id="transcript"></div>
+  </div>
+
+  <!-- VIEW 8: ritual preview -->
+  <div id="ritualPreviewView" class="view">
+    <button class="back" onclick="showView('ritualsView')">← back to rituals</button>
+    <h2 id="previewTitle"></h2>
+    <p id="previewDevices" class="muted"></p>
+
+    <div class="section-title">The shape of it</div>
+    <div id="previewDiagram" style="background:var(--card);border:1px solid var(--line);
+         border-radius:12px;padding:14px;overflow-x:auto;"></div>
+
+    <div class="section-title" style="margin-top:24px">Step by step</div>
+    <div id="previewSteps"></div>
+  </div>
+  
+  <!-- load order matters: app.js first (it holds shared state + showView) -->
+  <script src="app.js"></script>
+  <script src="devices.js"></script>
+  <script src="device.js"></script>
+  <script src="setup.js"></script>
+  <script src="rituals.js"></script>
+  <script src="builder.js"></script>
+</body>
+
+</html>

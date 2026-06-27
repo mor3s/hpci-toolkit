@@ -1,0 +1,20 @@
+# dependencies (reinstalled via npm install)
+node_modules/
+
+# the database — never commit data (test or participant)
+plants.db
+plants.db-wal
+plants.db-shm
+
+# local scratch / one-off scripts
+cleanup.js
+*.log
+
+# stuff I'm keeping locally but not publishing
+archive/
+
+# Arduino build artifacts (regenerated on each upload)
+firmware/**/build/
+*.bin
+*.elf
+*.hex
