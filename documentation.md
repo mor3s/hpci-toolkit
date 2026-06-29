@@ -592,7 +592,3 @@ as a conversation at a glance, without labels.
   console (F12) first when something's off.
 
 ---
-
-*This documentation describes the toolkit as built. The software is functionally
-complete; the remaining work is workshop deployment — a Raspberry Pi access point +
-server, wiring tutorial sheets, and a pre-flight checklist.*
