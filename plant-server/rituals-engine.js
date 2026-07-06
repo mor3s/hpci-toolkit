@@ -158,7 +158,41 @@ function makeEngine(db) {
                         .run(now() + step.min_recheck_ms, inst.id);
                 return nextStep;
             }
+            case 'tend':
+            case 'attend': {
+                const rel = step.type === 'tend' ? 'you → plant' : 'plant → you';
 
+                if (!step.confirm) {
+                    // no confirmation: show the instruction and move on (like a say)
+                    logEvent(inst.id, inst.current, step.type, { text: step.text, plant: step.plant, confirmed: false });
+                    setStatus(inst.id, (step.type === 'tend' ? '🌿 ' : '👁 ') + step.text);
+                    // brief linger so it can be read, same mechanism as say
+                    if (!inst._sayShown) {
+                        db.prepare('UPDATE ritual_instances SET wait_until = ? WHERE id = ?').run(now() + 4000, inst.id);
+                        return null;
+                    }
+                    return step.next;
+                }
+
+                // confirmation ON: post a prompt with a single "done" option, wait for it
+                const existing = db.prepare('SELECT * FROM prompts WHERE instance_id = ? AND step_id = ?')
+                    .get(inst.id, inst.current);
+
+                if (!existing) {
+                    db.prepare(`INSERT INTO prompts (instance_id, step_id, started_by, text, options, kind, answered, created_at)
+                      VALUES (?, ?, ?, ?, ?, 'ask', 0, ?)`)
+                        .run(inst.id, inst.current, inst.started_by, step.text, JSON.stringify(['done']), now());
+                    logEvent(inst.id, inst.current, step.type, { text: step.text, plant: step.plant, confirmed: false });
+                    setStatus(inst.id, (step.type === 'tend' ? '🌿 ' : '👁 ') + step.text);
+                    return null;
+                }
+                if (existing.answered) {
+                    // the human confirmed — the human↔plant act is now recorded as done
+                    logEvent(inst.id, inst.current, step.type + '_confirmed', { text: step.text, plant: step.plant, confirmed: true });
+                    return step.next;
+                }
+                return null;   // still waiting for confirmation
+            }
             // END — finish the run. (Stop-button finishes are handled in server.js.)
             case 'end':
                 logEvent(inst.id, inst.current, 'end', {});
@@ -183,7 +217,7 @@ function makeEngine(db) {
             try {
                 const ritual = db.prepare('SELECT definition FROM rituals WHERE id = ?').get(inst.ritual_id);
                 if (!ritual) continue;
-                const def  = JSON.parse(ritual.definition);
+                const def = JSON.parse(ritual.definition);
                 const step = def.steps[inst.current];
                 if (!step) { db.prepare("UPDATE ritual_instances SET status='failed' WHERE id=?").run(inst.id); continue; }
 
@@ -195,8 +229,8 @@ function makeEngine(db) {
 
                 // Tell runStep whether a wait/say's timer has elapsed. These flags
                 // live only for this tick (inst is re-fetched fresh each time).
-                inst._waiting  = (step.type === 'wait' && inst.wait_until && now() >= inst.wait_until);
-                inst._sayShown = (step.type === 'say'  && inst.wait_until && now() >= inst.wait_until);
+                inst._waiting = (step.type === 'wait' && inst.wait_until && now() >= inst.wait_until);
+                inst._sayShown = (['say','tend','attend'].includes(step.type) && inst.wait_until && now() >= inst.wait_until);
 
                 const next = runStep(inst, def, step);
 

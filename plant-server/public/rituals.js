@@ -155,33 +155,55 @@ async function openRitualPreview(ritualId) {
     Object.keys(def.steps).filter(id => id !== 'end').map((id, i) => {
       const s = def.steps[id];
       let desc = '';
-      if (s.type === 'say')   desc = `<span class="voice-plant">🌱 "${s.text}"</span>`;
-      if (s.type === 'ask')   desc = `<span class="voice-plant">❔ "${s.text}"</span><br><span class="muted">answers: ${(s.options||[]).join(', ')}</span>`;
-      if (s.type === 'wait')  desc = `<span class="muted">⏳ wait ${Math.round(s.duration_ms/60000)} min</span>`;
-      if (s.type === 'act')   desc = `<span class="muted">💡 set ${s.output} → rgb(${s.color.r},${s.color.g},${s.color.b})</span>`;
-      if (s.type === 'sense') desc = `<span class="muted">🔍 if ${s.sensor} ${s.op} ${s.value}</span>`;
+      if (s.type === 'say')    desc = `<span class="voice-plant">🌱 "${s.text}"</span>`;
+      if (s.type === 'ask')    desc = `<span class="voice-plant">❔ "${s.text}"</span><br><span class="muted">answers: ${(s.options||[]).join(', ')}</span>`;
+      if (s.type === 'wait')   desc = `<span class="muted">⏳ wait ${Math.round(s.duration_ms/60000)} min</span>`;
+      if (s.type === 'act')    desc = `<span class="muted">💡 set ${s.output} → rgb(${s.color.r},${s.color.g},${s.color.b})</span>`;
+      if (s.type === 'sense')  desc = `<span class="muted">🔍 if ${s.sensor} ${s.op} ${s.value}</span>`;
+      if (s.type === 'tend')   desc = `<span class="voice-plant">🌿 "${s.text}"</span>${s.confirm ? '<br><span class="muted">waits for confirmation</span>' : ''}`;
+      if (s.type === 'attend') desc = `<span class="voice-plant">👁 "${s.text}"</span>${s.confirm ? '<br><span class="muted">waits for confirmation</span>' : ''}`;
+
       return `<div class="step">
-        <div class="step-head"><span class="step-num">${i+1} · ${s.type}</span></div>
+        <div class="step-head">
+          <span class="step-num">${i+1} · ${s.type}</span>
+          ${relationTag(previewChain(s, def))}
+        </div>
         <div class="step-body">${desc}</div>
       </div>`;
     }).join('') || '<p class="muted">This ritual has no steps.</p>';
 }
-
+function previewChain(s, def) {
+  const H = { type:'human', name: currentUser ? currentUser.name : 'you' };
+  const UI = { type:'machine', name:'UI' };
+  const P = { type:'plant', name: s.plant_name || 'the plant' };
+  const M = { type:'machine', name: s.device_name || 'device' };
+  switch (s.type) {
+    case 'say':    return [UI, H];
+    case 'ask':    return [H, UI];
+    case 'sense':  return [P, M];
+    case 'act':    return [M, P];
+    case 'tend':   return [UI, H, P];
+    case 'attend': return [UI, H, P];
+    default:       return null;
+  }
+}
 // turn a compiled ritual into a Mermaid flowchart description.
 // One arrow per exit: sense forks true/false; a branching ask forks per answer.
 function ritualToMermaid(def) {
   const lines = ['flowchart TD'];                    // TD = top-down
   const label = (id) => {
-    if (id === 'end') return 'END([finish])';
+    if (id === 'end') return 'endNode([finish])';     // 'end' is reserved in Mermaid — use a safe id
     const s = def.steps[id];
     const i = Object.keys(def.steps).indexOf(id) + 1;
     let txt = s.type;
-    if (s.type === 'say')   txt = 'say: '   + truncate(s.text, 20);
-    if (s.type === 'ask')   txt = 'ask: '   + truncate(s.text, 20);
-    if (s.type === 'wait')  txt = 'wait '   + Math.round(s.duration_ms/60000) + 'm';
-    if (s.type === 'act')   txt = 'set '    + s.output;
-    if (s.type === 'sense') txt = 'sense '  + s.sensor + ' ' + s.op + ' ' + s.value;
-    return `${id}["${i}· ${txt}"]`;
+    if (s.type === 'say')    txt = 'say: '  + truncate(s.text, 18);
+    if (s.type === 'ask')    txt = 'ask: '  + truncate(s.text, 18);
+    if (s.type === 'wait')   txt = 'wait '  + Math.round(s.duration_ms/60000) + 'm';
+    if (s.type === 'act')    txt = 'set '   + s.output;
+    if (s.type === 'sense')  txt = 'sense ' + s.sensor + ' ' + s.op + ' ' + s.value;
+    if (s.type === 'tend')   txt = 'tend: ' + truncate(s.text, 18);
+    if (s.type === 'attend') txt = 'attend: ' + truncate(s.text, 18);
+    return `${id}["${i}· ${txt}<br/>(${relationText(s)})"]`;
   };
 
   for (const id of Object.keys(def.steps)) {
@@ -200,7 +222,17 @@ function ritualToMermaid(def) {
   }
   return lines.join('\n');
 }
-
+function relationText(s) {
+  switch (s.type) {
+    case 'say':    return 'UI→you';
+    case 'ask':    return 'you→UI';
+    case 'sense':  return 'plant→device';
+    case 'act':    return 'device→plant';
+    case 'tend':   return 'UI→you→plant';
+    case 'attend': return 'UI→you←plant';
+    default: return '';
+  }
+}
 // trim long text and strip quotes (which would break Mermaid's label syntax)
 function truncate(t, n) {
   t = (t || '').replace(/"/g, "'");
@@ -215,7 +247,14 @@ async function openTranscript(instanceId) {
   showView('transcriptView');
   refreshTranscript();
 }
+let runView = 'transcript';
 
+function setRunView(which) {
+  runView = which;
+  document.getElementById('transcript').style.display = which === 'transcript' ? 'block' : 'none';
+  document.getElementById('swimlane').style.display   = which === 'relations'  ? 'block' : 'none';
+  refreshTranscript();     // re-render whichever is showing
+}
 async function refreshTranscript() {
   if (openInstanceId === null) return;
   const inst   = await (await fetch('/instances/' + openInstanceId)).json();
@@ -225,6 +264,103 @@ async function refreshTranscript() {
   document.getElementById('transcriptStatus').textContent =
     inst.status === 'running' ? ('Now: ' + (inst.status_text || 'starting…')) : ('This run is ' + inst.status + '.');
   document.getElementById('transcript').innerHTML = renderTranscript(events);
+  if (runView === 'relations') document.getElementById('swimlane').innerHTML = renderSwimlane(events);
+}
+
+// map a diary event to its chain of pole-types, e.g. ['machine','human'] or ['machine','human','plant']
+function eventChain(e) {
+  switch (e.type) {
+    case 'say':             return ['machine','human'];
+    case 'ask':             return ['machine','human'];   // posing the question
+    case 'answer':          return ['human','machine'];
+    case 'sense':           return ['plant','machine'];
+    case 'act':             return ['machine','plant'];
+    case 'tend':
+    case 'tend_confirmed':  return ['machine','human','plant'];
+    case 'attend':
+    case 'attend_confirmed':return ['machine','human','plant'];
+    default:                return null;   // start/end/timeout — no relation arrow
+  }
+}
+
+function eventShortLabel(e) {
+  const p = e.payload || {};
+  switch (e.type) {
+    case 'say':    return 'says';
+    case 'ask':    return 'asks';
+    case 'answer': return '"' + (p.answer || '') + '"';
+    case 'sense':  return p.sensor + ' ' + (p.passed ? '✓' : '✗');
+    case 'act':    return 'set ' + p.output;
+    case 'tend':   case 'tend_confirmed':   return 'tend';
+    case 'attend': case 'attend_confirmed': return 'attend';
+    default: return e.type;
+  }
+}
+
+function renderSwimlane(events) {
+  // lanes: machine in the middle (mediation reads naturally)
+  const laneX = { machine: 240, human: 60, plant: 420 };
+  const laneColor = { human: '#5a7a52', plant: '#3d5a34', machine: '#8a7a5c' };
+  const laneLabel = { human: '🧑 you', machine: '🖥️ machine', plant: '🌱 plant' };
+  const W = 480, rowH = 46, topPad = 50;
+
+  // build the ordered list of relational events, collapsing consecutive same-sensor senses
+  const rel = [];
+  let i = 0;
+  while (i < events.length) {
+    const e = events[i];
+    const chain = eventChain(e);
+    if (!chain) { i++; continue; }
+    if (e.type === 'sense') {
+      let j = i;
+      while (j < events.length && events[j].type === 'sense' && events[j].payload.sensor === e.payload.sensor) j++;
+      const run = events.slice(i, j);
+      const last = run[run.length - 1];
+      rel.push({ chain, label: last.payload.sensor + (run.length > 1 ? ` ×${run.length}` : '') +
+                 (last.payload.passed ? ' ✓' : ' ✗'), e: last });
+      i = j;
+    } else {
+      rel.push({ chain, label: eventShortLabel(e), e });
+      i++;
+    }
+  }
+
+  if (rel.length === 0) return '<p class="muted">No relational events in this run yet.</p>';
+
+  const H = topPad + rel.length * rowH + 20;
+
+  // lane header lines + labels
+  let svg = `<svg viewBox="0 0 ${W} ${H}" style="max-width:100%;font-family:var(--sans)">
+    <defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L7,3 L0,6 Z" fill="var(--ink)"/></marker></defs>`;
+  for (const lane of ['human','machine','plant']) {
+    svg += `<line x1="${laneX[lane]}" y1="${topPad-10}" x2="${laneX[lane]}" y2="${H-10}"
+              stroke="${laneColor[lane]}" stroke-width="1" opacity="0.3"/>`;
+    svg += `<text x="${laneX[lane]}" y="${topPad-24}" text-anchor="middle" font-size="12"
+              fill="${laneColor[lane]}" font-weight="600">${laneLabel[lane]}</text>`;
+  }
+
+  // one row per relational event: arrow(s) between lanes
+  rel.forEach((r, idx) => {
+    const y = topPad + idx * rowH;
+    // draw an arrow for each hop in the chain (2 poles = 1 hop; 3 = 2 hops)
+    for (let h = 0; h < r.chain.length - 1; h++) {
+      const from = laneX[r.chain[h]], to = laneX[r.chain[h+1]];
+      const yy = y + h * 14;   // stagger multi-hop chains slightly
+      svg += `<line x1="${from}" y1="${yy}" x2="${to}" y2="${yy}"
+                stroke="var(--ink)" stroke-width="1.5" marker-end="url(#arrow)"/>`;
+      // dot at the origin
+      svg += `<circle cx="${from}" cy="${yy}" r="3" fill="${laneColor[r.chain[h]]}"/>`;
+    }
+    // label near the first hop
+    const lx = (laneX[r.chain[0]] + laneX[r.chain[1]]) / 2;
+    svg += `<text x="${lx}" y="${y - 4}" text-anchor="middle" font-size="11" fill="var(--bark)">${r.label}</text>`;
+  });
+
+  // arrowhead marker
+  
+  svg += `</svg>`;
+  return svg;
 }
 
 // render the diary, COLLAPSING runs of consecutive same-sensor sense events
@@ -261,17 +397,48 @@ function renderTranscript(events) {
 function renderEvent(e) {
   const t = new Date(e.ts).toLocaleTimeString();
   const p = e.payload || {};
+  const H = currentUser ? currentUser.name : 'you';
+  let body, chain = null;
+
   switch (e.type) {
-    case 'say':     return eventLine('🌱 ' + p.text, 'computer', t);
-    case 'ask':     return eventLine('🌱 ' + p.text + '  <span class="muted">(' + (p.options || []).join(' / ') + ')</span>', 'computer', t);
-    case 'answer':  return eventLine('🧑 ' + p.answer, 'human', t);
-    case 'act':     return eventLine('💡 set ' + p.output + ' → rgb(' + p.color.r + ',' + p.color.g + ',' + p.color.b + ')', 'machine', t);
-    case 'sense':   return eventLine('📈 ' + p.sensor + ' = ' + p.value + (p.passed !== undefined ? (p.passed ? ' ✓' : ' ✗') : ''), 'machine', t);
-    case 'timeout': return eventLine('⏱ no answer in time', 'machine', t);
-    case 'start':   return eventLine('— ritual started —', 'machine', t);
-    case 'end':     return eventLine('— ritual ended —', 'machine', t);
-    default:        return eventLine(e.type, 'machine', t);
+    case 'say':
+      body = eventLine('🌱 ' + p.text, 'computer', t);
+      chain = [{type:'machine',name:'UI'}, {type:'human',name:H}];
+      break;
+    case 'ask':
+      body = eventLine('🌱 ' + p.text + '  <span class="muted">(' + (p.options||[]).join(' / ') + ')</span>', 'computer', t);
+      chain = [{type:'machine',name:'UI'}, {type:'human',name:H}];   // posing = UI→human
+      break;
+    case 'answer':
+      body = eventLine('🧑 ' + p.answer, 'human', t);
+      chain = [{type:'human',name:H}, {type:'machine',name:'UI'}];   // answering = human→UI
+      break;
+    case 'act':
+      body = eventLine('💡 set ' + p.output + ' → rgb(' + p.color.r + ',' + p.color.g + ',' + p.color.b + ')', 'machine', t);
+      chain = [{type:'machine',name:p.device||'device'}, {type:'plant',name:'the plant'}];
+      break;
+    case 'sense':
+      body = eventLine('📈 ' + p.sensor + ' = ' + p.value + (p.passed!==undefined ? (p.passed?' ✓':' ✗') : ''), 'machine', t);
+      chain = [{type:'plant',name:'the plant'}, {type:'machine',name:p.device||'device'}];
+      break;
+    case 'tend':
+    case 'tend_confirmed':
+      body = eventLine('🌿 ' + p.text, 'computer', t);
+      chain = [{type:'machine',name:'UI'}, {type:'human',name:H}, {type:'plant',name:p.plant_name||'the plant'}];
+      break;
+    case 'attend':
+    case 'attend_confirmed':
+      body = eventLine('👁 ' + p.text, 'computer', t);
+      chain = [{type:'machine',name:'UI'}, {type:'human',name:H}, {type:'plant',name:p.plant_name||'the plant'}];
+      break;
+    case 'timeout': body = eventLine('⏱ no answer in time', 'machine', t); break;
+    case 'start':   body = eventLine('— ritual started —', 'machine', t); break;
+    case 'end':     body = eventLine('— ritual ended —', 'machine', t); break;
+    default:        body = eventLine(e.type, 'machine', t);
   }
+  return chain
+    ? `<div>${body}<div style="margin:-2px 0 8px 24px">${relationTag(chain)}</div></div>`
+    : body;
 }
 
 // voice -> CSS class: plant (serif), human (right bubble), machine (mono)
@@ -310,12 +477,16 @@ async function checkPrompts() {
   }
 }
 
-async function answerPrompt(id, answer) {
-  await fetch('/prompts/' + id + '/answer', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ answer }) });
-  checkPrompts();    // refresh immediately so the box clears/advances without waiting for the poll
-}
+
+
+
+
+
+
+
+
+
+
 
 // ============================================================================
 //  TIMERS — each started once at load; each guarded to act only when relevant

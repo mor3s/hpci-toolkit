@@ -21,50 +21,131 @@ let nextId = 1;               // ever-increasing source of stable step ids
 // ============================================================================
 
 async function openBuilder() {
-  draft = { name: '', devices: {}, steps: [] };       // a fresh, empty draft
+  draft = { name: '', plants: {}, devices: {}, steps: [] };
   showView('builderView');
   document.getElementById('ritualNameInput').value = '';
   document.getElementById('builderMessage').textContent = '';
+  selectedPlants = {};
 
-  // list the participant's subscribed devices, each with a role chooser
-  const devices = await (await fetch('/users/' + currentUser.id + '/devices')).json();
-  const box = document.getElementById('deviceRoles');
-  if (devices.length === 0) {
-    box.innerHTML = '<p class="muted">You have no devices yet — subscribe to one first.</p>';
-    return;
+  const plants = await (await fetch('/plants?user_id=' + currentUser.id)).json();
+  const picker = document.getElementById('plantPicker');
+  if (plants.length === 0) {
+    picker.innerHTML = '<option value="">— no plants yet —</option>';
+  } else {
+    picker.innerHTML = plants.map(p => `<option value="${p.id}">🌱 ${p.name}</option>`).join('');
   }
-  box.innerHTML = devices.map(d => `
-    <div class="device">
-      <strong>${d.name}</strong> <span class="muted">${d.id}</span><br>
-      <select id="role_${d.id}">
-        <option value="none">not used</option>
-        <option value="read">read (sense its values)</option>
-        <option value="write">write (control its outputs)</option>
-      </select>
-    </div>`).join('');
+  renderPlantDeviceRoles();     // empty to start
 }
+
+
+let selectedPlants = {};    // plantId -> { name, devices: [{device_id, target_type, role}] }
+
+async function addPlantToRitual() {
+  const picker = document.getElementById('plantPicker');
+  const plantId = picker.value;
+  if (!plantId) return;
+  if (selectedPlants[plantId]) return;      // already added — ignore
+
+  const name = picker.options[picker.selectedIndex].text.replace('🌱 ', '');
+  const devices = await (await fetch('/plants/' + plantId + '/devices')).json();
+  selectedPlants[plantId] = {
+    name,
+    devices: devices.map(d => ({ device_id: d.device_id, target_type: d.target_type, role: 'read' }))
+  };
+  renderPlantDeviceRoles();
+}
+
+function renderPlantDeviceRoles() {
+  const box = document.getElementById('plantDeviceRoles');
+  const ids = Object.keys(selectedPlants);
+  if (ids.length === 0) { box.innerHTML = '<p class="muted">No plants added yet.</p>'; return; }
+
+  box.innerHTML = ids.map(pid => {
+    const p = selectedPlants[pid];
+    const rows = p.devices.length === 0
+      ? '<p class="muted" style="margin:4px 0">No devices attached to this plant.</p>'
+      : p.devices.map((d, i) => {
+          const shared = d.target_type === 'environment';
+          return `<div style="margin:4px 0">
+            <strong>${d.device_id}</strong>
+            ${shared
+              ? '<span class="muted"> — shared, read only</span>'
+              : `<select onchange="setDeviceRole('${pid}', ${i}, this.value)">
+                   <option value="read"  ${d.role==='read' ? 'selected':''}>read (sense)</option>
+                   <option value="write" ${d.role==='write'? 'selected':''}>write (act)</option>
+                 </select>`}
+          </div>`;
+        }).join('');
+    return `<div class="step">
+      <div class="step-head">
+        <span class="step-num">🌱 ${p.name}</span>
+        <button class="step-remove" onclick="removePlantFromRitual('${pid}')">remove</button>
+      </div>
+      <div class="step-body">${rows}</div>
+    </div>`;
+  }).join('');
+}
+
+function removePlantFromRitual(plantId) {
+  delete selectedPlants[plantId];
+  renderPlantDeviceRoles();
+}
+
+function setDeviceRole(plantId, deviceIndex, role) {
+  selectedPlants[plantId].devices[deviceIndex].role = role;
+}
+
+
 
 // lock in the name + device roles, then fetch each device's config so the
 // step dropdowns can offer that device's real sensors/outputs.
 async function confirmDevices() {
   const name = document.getElementById('ritualNameInput').value.trim();
   if (!name) { document.getElementById('builderMessage').textContent = 'Give the ritual a name.'; return; }
+  if (Object.keys(selectedPlants).length === 0) {
+    document.getElementById('builderMessage').textContent = 'Pick at least one plant.'; return;
+  }
   draft.name = name;
 
-  // assign each chosen device a short alias (d1, d2, …); steps reference the alias
+  // record the plants involved (by id + name), for step references and framing
+  draft.plants = {};
+  for (const [pid, p] of Object.entries(selectedPlants)) {
+    draft.plants['p' + pid] = { plant_id: Number(pid), name: p.name };
+  }
+
+  // resolve devices + roles into the engine's device header (aliases → device + role),
+  // and remember which plant each device serves (for inference in steps)
   draft.devices = {};
-  document.querySelectorAll('[id^="role_"]').forEach(sel => {
-    const deviceId = sel.id.slice(5);                 // strip the "role_" prefix
-    if (sel.value === 'none') return;
-    const alias = 'd' + (Object.keys(draft.devices).length + 1);
-    draft.devices[alias] = { device_id: deviceId, role: sel.value };
-  });
-
   deviceConfigs = {};
-  for (const [alias, d] of Object.entries(draft.devices))
-    deviceConfigs[alias] = await (await fetch('/devices/' + d.device_id + '/config')).json();
-
-  document.getElementById('builderMessage').textContent = 'Devices confirmed. Now add steps below.';
+  let n = 1;
+  for (const [pid, p] of Object.entries(selectedPlants)) {
+    for (const d of p.devices) {
+      // one alias per device; if a device already added (shared across plants), reuse
+      let alias = Object.keys(draft.devices).find(a => draft.devices[a].device_id === d.device_id);
+      if (!alias) {
+        alias = 'd' + (n++);
+        draft.devices[alias] = { device_id: d.device_id, role: d.role, plant_id: Number(pid) };
+        deviceConfigs[alias] = await (await fetch('/devices/' + d.device_id + '/config')).json();
+      } else if (d.role === 'write') {
+        draft.devices[alias].role = 'write';   // if any plant marks it write, it's write
+      }
+    }
+  }
+  // for each plant, gather its available sensors + outputs, remembering which
+  // device provides each (so a sense/act step can infer the device from the pick)
+  draft.plantIO = {};   // 'p5' -> { sensors:[{name,device_id}], outputs:[{name,device_id}] }
+  for (const [pid, p] of Object.entries(selectedPlants)) {
+    const sensors = [], outputs = [];
+    for (const d of p.devices) {
+      const cfg = await (await fetch('/devices/' + d.device_id + '/config')).json();
+      (cfg.inputs || []).forEach(i => sensors.push({ name: i.name, device_id: d.device_id, interval_ms: i.interval_ms }));
+      // outputs only from writable (non-shared) devices — you can't act through a shared device
+      if (d.target_type !== 'environment')
+        (cfg.outputs || []).forEach(o => outputs.push({ name: o.name, device_id: d.device_id }));
+    }
+    draft.plantIO['p' + pid] = { sensors, outputs, name: p.name };
+  }
+  document.getElementById('builderMessage').textContent = 'Plants confirmed. Now add steps below.';
   renderSteps();
 }
 
@@ -91,8 +172,10 @@ function addStep() {
   if (type === 'say')   Object.assign(base, { text: '' });
   if (type === 'ask')   Object.assign(base, { text: '', options: '', timeout_min: 0, answer_routes: {}, branching: false });
   if (type === 'wait')  Object.assign(base, { minutes: 1 });
-  if (type === 'act')   Object.assign(base, { device: '', output: '', color: '#00ff00' });
-  if (type === 'sense') Object.assign(base, { device: '', sensor: '', op: '<', value: 0, then: '', else: '' });
+  if (type === 'act')   Object.assign(base, { plant: '', output: '', device: '', color: '#00ff00' });
+  if (type === 'sense') Object.assign(base, { plant: '', sensor: '', device: '', op: '<', value: 0, then: '', else: '' });
+  if (type === 'tend')   Object.assign(base, { plant: '', text: '', confirm: true });
+  if (type === 'attend') Object.assign(base, { plant: '', text: '', confirm: true });
   draft.steps.push(base);
   renderSteps();
 }
@@ -121,7 +204,7 @@ function editStep(id, field, value) {
   // device change must re-render so the dependent sensor/output dropdown updates.
   // options does NOT re-render here — that would steal focus mid-typing; the
   // options input re-renders on blur instead (see renderSteps).
-  if (field === 'device') renderSteps();
+  if (field === 'device' || field === 'plant') renderSteps();
 }
 
 // ============================================================================
@@ -157,33 +240,47 @@ function renderSteps() {
         <label>Wait for (minutes)</label>
         <input type="number" value="${s.minutes}" oninput="editStep('${s.id}','minutes',this.value)">`;
 
-    if (s.type === 'act')
+    if (s.type === 'act') {
       fields = `
         <label>On which plant</label>
-        ${deviceDropdown(s, writableDevices())}
-        <label>Which output</label>
-        ${outputDropdown(s)}
+        ${plantDropdown(s)}
+        <label>Turn on which light / output</label>
+        ${ioDropdown(s, 'output')}
         <label>Colour</label>
         <input type="color" value="${s.color}" oninput="editStep('${s.id}','color',this.value)">`;
-
-    if (s.type === 'sense') {
-      const devs = readableDevices();
-      fields = devs.length === 0
-        ? `<p class="muted">This ritual has no readable devices. Go back, confirm a device as read or write, then add the sensor check.</p>`
-        : `
-          <label>On which plant</label>
-          ${deviceDropdown(s, devs)}
-          <label>Which sensor</label>
-          ${sensorDropdown(s)}
-          <label>Condition</label>
-          <div style="display:flex;gap:8px">
-            <select onchange="editStep('${s.id}','op',this.value)" style="flex:0 0 70px">
-              ${['<','>','='].map(o => `<option ${s.op===o?'selected':''}>${o}</option>`).join('')}
-            </select>
-            <input type="number" value="${s.value}" oninput="editStep('${s.id}','value',this.value)" style="flex:1">
-          </div>`;
     }
 
+    if (s.type === 'sense') {
+      fields = `
+        <label>Read from which plant</label>
+        ${plantDropdown(s)}
+        <label>Which sensor</label>
+        ${ioDropdown(s, 'sensor')}
+        <label>Condition</label>
+        <div style="display:flex;gap:8px">
+          <select onchange="editStep('${s.id}','op',this.value)" style="flex:0 0 70px">
+            ${['<','>','='].map(o => `<option ${s.op===o?'selected':''}>${o}</option>`).join('')}
+          </select>
+          <input type="number" value="${s.value}" oninput="editStep('${s.id}','value',this.value)" style="flex:1">
+        </div>`;
+    }
+    if (s.type === 'tend' || s.type === 'attend') {
+      const verb = s.type === 'tend' ? 'do to' : 'notice about';
+      const example = s.type === 'tend'
+        ? 'e.g. Give Basil some water.'
+        : 'e.g. Sit with Basil a moment. Notice the colour of its leaves.';
+      fields = `
+        <label>Which plant</label>
+        ${plantDropdown(s)}
+        <label>What to ask the person to ${verb} the plant</label>
+        <input placeholder="${example}" value="${s.text}"
+               oninput="editStep('${s.id}','text',this.value)">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-top:4px">
+          <input type="checkbox" style="width:auto" ${s.confirm ? 'checked' : ''}
+                 onchange="editStep('${s.id}','confirm',this.checked)">
+          wait for them to confirm they did it
+        </label>`;
+    }
     return `<div class="step">
       <div class="step-head">
         <span class="step-num">${n} · ${s.type}</span>
@@ -341,6 +438,8 @@ function validateDraft() {
 
     if (s.type === 'act'   && (!s.device || !s.output)) problems.push(`Step ${n} (act): pick a device and output.`);
     if (s.type === 'sense' && (!s.device || !s.sensor)) problems.push(`Step ${n} (sense): pick a device and sensor.`);
+    if ((s.type === 'tend' || s.type === 'attend') && !s.plant)
+      problems.push(`Step ${n} (${s.type}): pick a plant.`);
   }
 
   // (2) reachability: can we get from the start to END? (traversal, loop-safe)
@@ -418,18 +517,27 @@ function compileDraft() {
     if (s.type === 'wait') { out.duration_ms = +s.minutes * 60000; out.next = sid(s.next); }
 
     if (s.type === 'act') {
-      out.device = s.device; out.output = s.output;
+      const alias = Object.keys(draft.devices).find(a => draft.devices[a].device_id === s.device);
+      out.device = alias; out.output = s.output;
       out.color = hexToRgb(s.color); out.next = sid(s.next);
+      out.plant_name = draft.plantIO[s.plant] ? draft.plantIO[s.plant].name : '';
+      out.device_name = s.device;                 // the device_id (nickname); fine for display
     }
-
     if (s.type === 'sense') {
-      out.device = s.device; out.sensor = s.sensor; out.op = s.op; out.value = +s.value;
+      const alias = Object.keys(draft.devices).find(a => draft.devices[a].device_id === s.device);
+      out.device = alias; out.sensor = s.sensor; out.op = s.op; out.value = +s.value;
       out.then = sid(s.then); out.else = sid(s.else);
-      // pace a self-loop to how often this sensor actually updates
-      const input = deviceConfigs[s.device] && deviceConfigs[s.device].inputs.find(i => i.name === s.sensor);
-      out.min_recheck_ms = (input && input.interval_ms) || 5000;
+      out.min_recheck_ms = s.min_recheck_ms || 5000;
+      out.plant_name = draft.plantIO[s.plant] ? draft.plantIO[s.plant].name : '';
+      out.device_name = s.device;
     }
-
+    if (s.type === 'tend' || s.type === 'attend') {
+      out.plant = s.plant;                    // plant alias, for framing/transcript
+      out.plant_name = draft.plantIO[s.plant] ? draft.plantIO[s.plant].name : '';
+      out.text = s.text;
+      out.confirm = !!s.confirm;
+      out.next = sid(s.next);
+    }
     steps[idToSid[s.id]] = out;
   });
   steps['end'] = { type: 'end' };
@@ -453,4 +561,67 @@ async function saveRitual() {
   });
   msg.textContent = '✓ Saved! Find it in your rituals.';
   setTimeout(() => { showView('ritualsView'); loadRuns(); }, 1000);
+}
+
+
+
+// dropdown of the plants this ritual involves
+function plantDropdown(s) {
+  const plants = draft.plantIO || {};
+  return `<select onchange="editStep('${s.id}','plant',this.value)">
+    <option value="">— plant —</option>
+    ${Object.entries(plants).map(([alias, p]) =>
+      `<option value="${alias}" ${s.plant===alias?'selected':''}>🌱 ${p.name}</option>`).join('')}
+  </select>`;
+}
+
+// dropdown of the chosen plant's sensors (kind='sensor') or outputs (kind='output')
+function ioDropdown(s, kind) {
+  const p = draft.plantIO && draft.plantIO[s.plant];
+  const list = p ? (kind === 'sensor' ? p.sensors : p.outputs) : [];
+  const field = kind === 'sensor' ? 'sensor' : 'output';
+  return `<select onchange="pickIO('${s.id}','${field}',this.value)">
+    <option value="">— ${kind} —</option>
+    ${list.map(x => `<option value="${x.name}" ${s[field]===x.name?'selected':''}>${x.name}</option>`).join('')}
+  </select>`;
+}
+
+// picking a sensor/output also INFERS the device that provides it
+function pickIO(stepId, field, value) {
+  const s = draft.steps.find(x => x.id === stepId);
+  s[field] = value;
+  const p = draft.plantIO[s.plant];
+  const list = field === 'sensor' ? p.sensors : p.outputs;
+  const match = list.find(x => x.name === value);
+  s.device = match ? match.device_id : '';       // the inferred device
+  // for sense, also carry the sensor's recheck interval (for self-loop pacing)
+  if (field === 'sensor' && match && match.interval_ms) s.min_recheck_ms = match.interval_ms;
+}
+
+// the chain of poles a step enacts, e.g. ['UI','Nour'] or ['UI','Nour','Basil']
+// each pole: { type:'human'|'plant'|'machine', name:'Nour'|'Basil'|'UI'|deviceNickname }
+function stepRelation(step, ctx) {
+  const H = { type: 'human',   name: ctx.human || 'you' };
+  const P = (n) => ({ type: 'plant', name: n || 'the plant' });
+  const UI = { type: 'machine', name: 'UI' };
+  const M = (n) => ({ type: 'machine', name: n || 'device' });
+
+  switch (step.type) {
+    case 'say':    return [UI, H];                       // machine → human
+    case 'ask':    return [H, UI];                       // human → machine
+    case 'sense':  return [P(step.plant_name), M(step.device_name)];   // plant → machine
+    case 'act':    return [M(step.device_name), P(step.plant_name)];   // machine → plant
+    case 'tend':   return [UI, H, P(step.plant_name)];   // UI → human → plant (full chain)
+    case 'attend': return [UI, H, P(step.plant_name)];   // UI → human ← plant (full chain)
+    default:       return null;
+  }
+}
+const POLE_GLYPH = { human: '🧑', plant: '🌱', machine: '🖥️' };
+
+function relationTag(chain) {
+  if (!chain) return '';
+  return `<span class="relation">` +
+    chain.map(p => `<span class="pole pole-${p.type}">${POLE_GLYPH[p.type]} ${p.name}</span>`)
+         .join('<span class="rel-arrow">→</span>') +
+    `</span>`;
 }

@@ -6,10 +6,10 @@
 #include <Adafruit_BME680.h>
 #include <Adafruit_ADS1X15.h>
 
-const char* WIFI_SSID = "wifi-name";
-const char* WIFI_PASS = "password";
+const char* WIFI_SSID = "Laptop-Nour";
+const char* WIFI_PASS = "123456789";
 const char* SERVER    = "http://192.168.137.1:3000";
-String deviceId = "esp32-plant";
+String deviceId = "device-2";
 
 JsonDocument config;
 unsigned long lastSample = 0;

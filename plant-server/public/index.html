@@ -12,7 +12,10 @@
 
 <body>
   <h1>🌿 HPCI Toolkit</h1>
-  <<div id="promptBox" style="display:none; background:#f6eee8; border:1px solid #e3cdbd;
+
+  <div id="identityBar" style="display:none"></div>
+
+  <div id="promptBox" style="display:none; background:#f6eee8; border:1px solid #e3cdbd;
        border-radius:12px; padding:14px; margin-bottom:12px;"></div>
        
   <!-- VIEW 1: login -->
@@ -24,15 +27,79 @@
 
   <!-- VIEW 2: devices -->
   <div id="devicesView" class="view">
-    <p class="muted">Signed in as <strong id="whoami"></strong></p>
-    <button id="ritualsBtn" onclick="openRituals()">Rituals →</button>
-    <h2>Your devices</h2>
+    <button class="back" onclick="showView('plantsView'); loadPlants()">← back to plants</button>
+    <h2>Devices &amp; hardware</h2>
+    <p class="muted">Subscribe to a board and set up its sensors. Data shows on your plants.</p>
     <div id="deviceList"></div>
     <h2>Add a device</h2>
     <input id="newDeviceId" placeholder="device id, e.g. esp32-bme">
     <input id="newDeviceName" placeholder="a nickname">
     <button onclick="subscribe()">Subscribe</button>
   </div>
+
+   <!-- VIEW: plants -->
+<div id="plantsView" class="view">
+    <h2>Your plants</h2>
+    <p id="plantsIntro" class="muted"></p>
+    <div id="plantList"></div>
+
+    <h3>Add a plant</h3>
+    <input id="newPlantName" placeholder="name your plant, e.g. Basil">
+    <button onclick="addPlant()">Name it</button>
+
+    <div class="section" style="margin-top:24px">
+      <div class="section-title">Also</div>
+      <button id="ritualsBtn" onclick="openRituals()">Rituals →</button>
+      <button onclick="openEnvironments()">🪴 Environments</button>
+      <button onclick="showView('devicesView'); loadDevices()">⚙ Devices &amp; hardware</button>
+    </div>
+  </div>
+
+    <!-- VIEW: one plant -->
+  <div id="plantView" class="view">
+    <button class="back" onclick="openPlants()">← back to plants</button>
+    <h3 id="plantTitle"></h3>
+    <p>Environment:
+      <select id="plantEnvPicker" onchange="setPlantEnvironment()"></select>
+    </p>
+
+    <h3>Devices attached to this plant</h3>
+    <div id="plantDevices"></div>
+
+    <h3>Attach a device</h3>
+    <select id="attachPicker"></select>
+    <button onclick="attachDevice()">Attach</button>
+
+    <h3>What this plant senses</h3>
+    <select id="plantSensorPicker" onchange="onPlantSensorChange()"></select>
+    <div id="plantData"></div>
+
+    
+  </div>
+  <!-- VIEW: environments -->
+  <div id="environmentsView" class="view">
+    <button class="back" onclick="openPlants()">← back</button>
+    <h2>Environments</h2>
+    <p class="muted">A group of plants that share conditions — attach a shared sensor (like a climate sensor) to the whole group.</p>
+    <div id="environmentList"></div>
+    <h3>Add an environment</h3>
+    <input id="newEnvName" placeholder="e.g. the windowsill">
+    <button onclick="addEnvironment()">Name it</button>
+  </div>
+
+  <!-- VIEW: one environment -->
+  <div id="environmentView" class="view">
+    <button class="back" onclick="openEnvironments()">← back</button>
+    <h2 id="envTitle"></h2>
+    <h3>Plants in this environment</h3>
+    <div id="envPlants"></div>
+    <h3>Shared devices</h3>
+    <div id="envDevices"></div>
+    <h3>Attach a shared device</h3>
+    <select id="envAttachPicker"></select>
+    <button onclick="attachToEnv()">Attach to environment</button>
+  </div>
+
 
   <!-- VIEW 3: one device, live -->
   <div id="deviceView" class="view">
@@ -105,9 +172,13 @@
     <label>Name</label>
     <input id="ritualNameInput" placeholder="Morning check">
 
-    <h3>Which plants does this ritual use?</h3>
-    <div id="deviceRoles"></div>
-    <button onclick="confirmDevices()">Confirm devices</button>
+    <h3>Plants in this ritual</h3>
+    <div id="plantDeviceRoles"></div>
+    <div class="row">
+      <select id="plantPicker"></select>
+      <button onclick="addPlantToRitual()">+ add plant</button>
+    </div>
+    <button onclick="confirmDevices()">Confirm plants</button>
     <p id="builderMessage" class="muted"></p>
 
     <hr>
@@ -115,11 +186,13 @@
     <div id="stepList"></div>
     <div class="row">
       <select id="newStepType">
-        <option value="say">say (tell the human)</option>
-        <option value="ask">ask (question)</option>
+        <option value="say">say (UI → you)</option>
+        <option value="ask">ask (you → UI)</option>
+        <option value="tend">tend (you → plant)</option>
+        <option value="attend">attend (plant → you)</option>
         <option value="wait">wait</option>
-        <option value="act">act (drive output)</option>
-        <option value="sense">sense (check a value)</option>
+        <option value="act">act (device → plant)</option>
+        <option value="sense">sense (plant → device)</option>
       </select>
       <button onclick="addStep()">+ add step</button>
     </div>
@@ -131,11 +204,16 @@
   </div>
 
   <!-- VIEW 7: one run's full conversation -->
-  <div id="transcriptView" class="view">
+<div id="transcriptView" class="view">
     <button class="back" onclick="showView('ritualsView')">← back to rituals</button>
     <h2 id="transcriptTitle"></h2>
     <p id="transcriptStatus" class="muted"></p>
+    <div class="row" style="gap:8px;margin-bottom:12px">
+      <button class="small-btn" onclick="setRunView('transcript')">Conversation</button>
+      <button class="small-btn" onclick="setRunView('relations')">Relations</button>
+    </div>
     <div id="transcript"></div>
+    <div id="swimlane" style="display:none"></div>
   </div>
 
   <!-- VIEW 8: ritual preview -->
@@ -159,6 +237,8 @@
   <script src="setup.js"></script>
   <script src="rituals.js"></script>
   <script src="builder.js"></script>
+  <script src="plants.js"></script>
+  <script src="environments.js"></script>
 </body>
 
 </html>

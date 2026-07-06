@@ -120,6 +120,29 @@ db.exec(`
     payload     TEXT,                  -- JSON; shape depends on type
     ts          INTEGER
   );
+
+  CREATE TABLE IF NOT EXISTS plants (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    name           TEXT,
+    environment_id INTEGER,           -- optional; null = not in an environment
+    created_by     INTEGER,
+    created_at     INTEGER
+  );
+
+  CREATE TABLE IF NOT EXISTS attachments (
+    device_id  TEXT PRIMARY KEY,       -- one row per device (a device attaches to ONE target)
+    target_type TEXT,                  -- 'plant' | 'environment' | 'human'
+    target_id   INTEGER,               -- the id of that plant/environment/(user)
+    updated_at  INTEGER
+  );
+
+  CREATE TABLE IF NOT EXISTS environments (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    name       TEXT,
+    created_by INTEGER,
+    created_at INTEGER
+  );
+
 `);
 
 // ----------------------------------------------------------------------------
@@ -152,6 +175,96 @@ app.get('/users', (req, res) => {
   res.json(db.prepare('SELECT * FROM users ORDER BY name').all());
 });
 
+
+// ============================================================================
+//  PLANTS 
+// ============================================================================
+
+// register (name) a new plant — the first act of relationship
+app.post('/plants', (req, res) => {
+  const info = db.prepare('INSERT INTO plants (name, environment_id, created_by, created_at) VALUES (?, ?, ?, ?)')
+    .run(req.body.name, req.body.environment_id || null, req.body.user_id, Date.now());
+  res.json({ id: info.lastInsertRowid, name: req.body.name });
+});
+
+// a user's plants
+app.get('/plants', (req, res) => {
+  res.json(db.prepare('SELECT * FROM plants WHERE created_by = ? ORDER BY created_at DESC')
+    .all(req.query.user_id));
+});
+
+// which devices are attached to a given plant
+app.get('/plants/:id/devices', (req, res) => {
+  const plant = db.prepare('SELECT environment_id FROM plants WHERE id = ?').get(req.params.id);
+  const envId = plant ? plant.environment_id : null;
+  res.json(db.prepare(`
+    SELECT device_id, target_type FROM attachments
+    WHERE (target_type='plant' AND target_id=?) OR (target_type='environment' AND target_id=?)
+  `).all(req.params.id, envId));
+});
+app.post('/devices/:id/detach', (req, res) => {
+  db.prepare('DELETE FROM attachments WHERE device_id = ?').run(req.params.id);
+  res.json({ ok: true });
+});
+// name a new environment (a collection of plants sharing conditions)
+app.post('/environments', (req, res) => {
+  const info = db.prepare('INSERT INTO environments (name, created_by, created_at) VALUES (?, ?, ?)')
+    .run(req.body.name, req.body.user_id, Date.now());
+  res.json({ id: info.lastInsertRowid, name: req.body.name });
+});
+
+app.get('/environments', (req, res) => {
+  res.json(db.prepare('SELECT * FROM environments WHERE created_by = ? ORDER BY created_at DESC')
+    .all(req.query.user_id));
+});
+app.get('/environments/:id/plants', (req, res) => {
+  res.json(db.prepare('SELECT id, name FROM plants WHERE environment_id = ?').all(req.params.id));
+});
+// assign a plant to an environment (or null to remove it)
+app.put('/plants/:id/environment', (req, res) => {
+  const envId = req.body.environment_id ? Number(req.body.environment_id) : null;
+  db.prepare('UPDATE plants SET environment_id = ? WHERE id = ?').run(envId, req.params.id);
+  res.json({ ok: true });
+});
+
+app.get('/environments/:id/devices', (req, res) => {
+  res.json(db.prepare(`SELECT device_id FROM attachments
+    WHERE target_type = 'environment' AND target_id = ?`).all(req.params.id));
+});
+// all sensor names available for a plant = union across its devices (own + environment's)
+app.get('/plants/:id/sensors', (req, res) => {
+  const plant = db.prepare('SELECT environment_id FROM plants WHERE id = ?').get(req.params.id);
+  const envId = plant ? plant.environment_id : null;
+  const devices = db.prepare(`
+    SELECT device_id FROM attachments
+    WHERE (target_type='plant' AND target_id=?) OR (target_type='environment' AND target_id=?)
+  `).all(req.params.id, envId).map(r => r.device_id);
+  if (devices.length === 0) return res.json([]);
+
+  const placeholders = devices.map(() => '?').join(',');
+  const rows = db.prepare(
+    `SELECT DISTINCT sensor_name FROM readings WHERE device_id IN (${placeholders})`
+  ).all(...devices);
+  res.json(rows.map(r => r.sensor_name));
+});
+
+// readings for one sensor on a plant (across all its devices), oldest first
+app.get('/plants/:id/readings', (req, res) => {
+  const sensor = req.query.sensor;
+  const plant = db.prepare('SELECT environment_id FROM plants WHERE id = ?').get(req.params.id);
+  const envId = plant ? plant.environment_id : null;
+  const devices = db.prepare(`
+    SELECT device_id FROM attachments
+    WHERE (target_type='plant' AND target_id=?) OR (target_type='environment' AND target_id=?)
+  `).all(req.params.id, envId).map(r => r.device_id);
+  if (devices.length === 0) return res.json([]);
+
+  const placeholders = devices.map(() => '?').join(',');
+  const rows = db.prepare(
+    `SELECT * FROM readings WHERE sensor_name = ? AND device_id IN (${placeholders}) ORDER BY ts ASC`
+  ).all(sensor, ...devices);
+  res.json(rows);
+});
 // ============================================================================
 //  DEVICES — subscription, config, sensors
 // ============================================================================
@@ -200,6 +313,18 @@ app.put('/devices/:id/config', (req, res) => {
     INSERT INTO configs (device_id, json, updated_at) VALUES (?, ?, ?)
     ON CONFLICT(device_id) DO UPDATE SET json = excluded.json, updated_at = excluded.updated_at
   `).run(req.params.id, JSON.stringify(config), Date.now());
+  res.json({ ok: true });
+});
+
+// attach a device to a target (plant / environment / human). Upsert: re-attaching moves it.
+app.post('/devices/:id/attach', (req, res) => {
+  db.prepare('INSERT OR IGNORE INTO devices (id) VALUES (?)').run(req.params.id);
+  db.prepare(`
+    INSERT INTO attachments (device_id, target_type, target_id, updated_at)
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT(device_id) DO UPDATE SET
+      target_type = excluded.target_type, target_id = excluded.target_id, updated_at = excluded.updated_at
+  `).run(req.params.id, req.body.target_type, req.body.target_id, Date.now());
   res.json({ ok: true });
 });
 

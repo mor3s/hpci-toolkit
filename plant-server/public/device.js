@@ -4,11 +4,15 @@
 //  builder.js (all files share one global scope — see app.js).
 // ============================================================================
 
+let deviceReturnTo = 'devicesView'; 
+
 // open a device: decide whether it's set up yet, then show the right thing.
 // A fresh (unconfigured) device shows only the Setup prompt; a configured one
 // shows the live sensor graph + output controls.
-async function openDevice(id, name) {
-  currentDevice = id;                         // a string id (NOT an object — never `.id` it)
+async function openDevice(id, name, returnTo) {
+  console.log('openDevice called with returnTo =', returnTo);
+  currentDevice = id;
+  deviceReturnTo = returnTo || 'devicesView';   // remember where we came from
   document.getElementById('deviceTitle').textContent = name;
   showView('deviceView');
 
@@ -19,20 +23,17 @@ async function openDevice(id, name) {
   const setupPrompt = document.getElementById('deviceSetupPrompt');
 
   if (!hasSetup) {
-    // nothing configured yet — invite the user to Setup, hide the live UI
     liveBits.style.display = 'none';
     setupPrompt.style.display = 'block';
     return;
   }
-
   liveBits.style.display = 'block';
   setupPrompt.style.display = 'none';
 
-  // populate the sensor picker from what this device has actually reported
   const sensors = await (await fetch('/devices/' + id + '/sensors')).json();
   document.getElementById('sensorPicker').innerHTML = sensors.map(s => `<option>${s}</option>`).join('');
   currentSensor = sensors[0] || null;
-  history = [];                               // clear the graph buffer for the new device
+  history = [];
   loadOutputControl();
 }
 
@@ -132,10 +133,15 @@ function onSensorChange() {
 }
 
 function goBack() {
+  console.log('goBack, returnTo =', deviceReturnTo);
   currentDevice = null; currentSensor = null;
-  showView('devicesView');
+  if (deviceReturnTo === 'plantView' && currentPlant) {
+    openPlant(currentPlant.id, currentPlant.name);   // return to the plant we came from
+  } else {
+    showView('devicesView');
+    loadDevices();
+  }
 }
-
 // ============================================================================
 //  LIVE DATA LOOP + GRAPH
 //  refresh() polls the selected sensor's readings every 2s; p5's draw() renders

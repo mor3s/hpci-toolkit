@@ -29,12 +29,19 @@ async function login() {
   const name = document.getElementById('nameInput').value.trim();
   if (!name) return;
   const res = await fetch('/users', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ name })
   });
-  currentUser = await res.json();                       // { id, name }
-  document.getElementById('whoami').textContent = currentUser.name;
-  showView('devicesView');
-  loadDevices();                                        // defined in devices.js
+  currentUser = await res.json();
+  renderIdentity();                 // show who's present
+  showView('plantsView');
+  loadPlants();
+}
+
+function renderIdentity() {
+  const bar = document.getElementById('identityBar');
+  if (!currentUser) { bar.style.display = 'none'; return; }
+  bar.style.display = 'flex';
+  bar.innerHTML = `<span class="who-label">You</span>
+                   <span class="who-name">🧑 ${currentUser.name}</span>`;
 }

@@ -208,3 +208,41 @@ hr { border: none; border-top: 1px solid var(--line); margin: var(--s5) 0; }
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; }
 }
+
+.env-group {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px 14px;
+  margin-bottom: 14px;
+  background: rgba(90, 122, 82, 0.04);   /* faint moss tint, so the group reads as one */
+}
+.env-group-title {
+  font-family: var(--serif);
+  font-weight: 600;
+  color: var(--moss-dark);
+  margin-bottom: 8px;
+  cursor: pointer;
+}
+.env-group-title:hover { color: var(--clay); }
+
+#identityBar {
+  display: flex; align-items: center; gap: 10px;
+  background: #eef2ec;                 /* faint moss, the "human" tone */
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--moss);  /* an agent-accent, like the live card's clay */
+  border-radius: 12px;
+  padding: 10px 14px;
+  margin-bottom: 14px;
+}
+#identityBar .who-label {
+  font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--bark);
+}
+#identityBar .who-name {
+  font-family: var(--serif); font-size: 18px; font-weight: 600; color: var(--ink);
+}
+.relation { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; flex-wrap: wrap; }
+.pole { padding: 1px 6px; border-radius: 6px; white-space: nowrap; }
+.pole-human   { background: #eef2ec; color: var(--moss-dark); }
+.pole-plant   { background: #eaf3e6; color: #3d5a34; }
+.pole-machine { background: #f0ece2; color: var(--bark); }
+.rel-arrow { color: var(--bark); font-size: 11px; }
