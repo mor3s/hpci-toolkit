@@ -11,9 +11,15 @@
 </head>
 
 <body>
-  <h1>🌿 HPCI Toolkit</h1>
+  <h1 onclick="goHome()" style="cursor:pointer">🌿 HPCI Toolkit</h1>
 
   <div id="identityBar" style="display:none"></div>
+
+  <!-- top-level tabs: the two central parts of the toolkit -->
+  <div id="mainTabs" class="tabs" style="display:none">
+    <button id="tabPlants"  class="tab active" onclick="switchTab('plants')">🌱 Plants</button>
+    <button id="tabRituals" class="tab"        onclick="switchTab('rituals')">✿ Rituals</button>
+  </div>
 
   <div id="promptBox" style="display:none; background:#f6eee8; border:1px solid #e3cdbd;
        border-radius:12px; padding:14px; margin-bottom:12px;"></div>
@@ -47,9 +53,7 @@
     <input id="newPlantName" placeholder="name your plant, e.g. Basil">
     <button onclick="addPlant()">Name it</button>
 
-    <div class="section" style="margin-top:24px">
-      <div class="section-title">Also</div>
-      <button id="ritualsBtn" onclick="openRituals()">Rituals →</button>
+    <div class="utility-links">
       <button onclick="openEnvironments()">🪴 Environments</button>
       <button onclick="showView('devicesView'); loadDevices()">⚙ Devices &amp; hardware</button>
     </div>
@@ -61,7 +65,12 @@
     <h3 id="plantTitle"></h3>
     <p>Environment:
       <select id="plantEnvPicker" onchange="setPlantEnvironment()"></select>
+      <button class="small-btn" onclick="toggleNewEnv()">+ new</button>
     </p>
+    <div id="newEnvRow" style="display:none;margin:-4px 0 8px">
+      <input id="newEnvInline" placeholder="new environment name">
+      <button class="small-btn" onclick="createEnvForPlant()">create &amp; use</button>
+    </div>
 
     <h3>Devices attached to this plant</h3>
     <div id="plantDevices"></div>
@@ -74,8 +83,9 @@
     <select id="plantSensorPicker" onchange="onPlantSensorChange()"></select>
     <div id="plantData"></div>
 
-    
   </div>
+
+  
   <!-- VIEW: environments -->
   <div id="environmentsView" class="view">
     <button class="back" onclick="openPlants()">← back</button>
@@ -96,7 +106,7 @@
     <h3>Shared devices</h3>
     <div id="envDevices"></div>
     <h3>Attach a shared device</h3>
-    <select id="envAttachPicker"></select>
+    <div id="envAttachRow"></div>
     <button onclick="attachToEnv()">Attach to environment</button>
   </div>
 

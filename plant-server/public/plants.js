@@ -3,7 +3,6 @@ let currentPlant = null;   // declared once, at the top
 // --- plant live data ---
 let plantSensor = null;
 let plantHistory = [];
-console.log('plants.js loaded — version with plantView');
 
 
 async function openPlants() {
@@ -179,7 +178,30 @@ function sparkline(values) {
     <polyline points="${pts}" fill="none" stroke="var(--moss)" stroke-width="2"/>
   </svg>`;
 }
+function toggleNewEnv() {
+  const row = document.getElementById('newEnvRow');
+  row.style.display = row.style.display === 'none' ? 'block' : 'none';
+  if (row.style.display === 'block') document.getElementById('newEnvInline').focus();
+}
 
+async function createEnvForPlant() {
+  const name = document.getElementById('newEnvInline').value.trim();
+  if (!name) return;
+  // create the environment
+  const env = await (await fetch('/environments', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ user_id: currentUser.id, name })
+  })).json();
+  // assign this plant to it
+  await fetch('/plants/' + currentPlant.id + '/environment', {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ environment_id: env.id })
+  });
+  document.getElementById('newEnvInline').value = '';
+  document.getElementById('newEnvRow').style.display = 'none';
+  renderEnvPicker();        // refresh the picker (now includes + selects the new env)
+  renderPlantDevices();     // its devices may change (env devices now count)
+}
 setInterval(() => {
   if (document.getElementById('plantView').classList.contains('active')) refreshPlantData();
 }, 2000);

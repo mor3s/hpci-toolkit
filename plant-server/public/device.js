@@ -10,7 +10,6 @@ let deviceReturnTo = 'devicesView';
 // A fresh (unconfigured) device shows only the Setup prompt; a configured one
 // shows the live sensor graph + output controls.
 async function openDevice(id, name, returnTo) {
-  console.log('openDevice called with returnTo =', returnTo);
   currentDevice = id;
   deviceReturnTo = returnTo || 'devicesView';   // remember where we came from
   document.getElementById('deviceTitle').textContent = name;
@@ -133,7 +132,6 @@ function onSensorChange() {
 }
 
 function goBack() {
-  console.log('goBack, returnTo =', deviceReturnTo);
   currentDevice = null; currentSensor = null;
   if (deviceReturnTo === 'plantView' && currentPlant) {
     openPlant(currentPlant.id, currentPlant.name);   // return to the plant we came from

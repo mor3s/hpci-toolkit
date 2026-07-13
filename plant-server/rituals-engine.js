@@ -94,41 +94,39 @@ function makeEngine(db) {
                 const existing = db.prepare('SELECT * FROM prompts WHERE instance_id = ? AND step_id = ?')
                     .get(inst.id, inst.current);
 
-                // (a) first time here: post the prompt, start the timeout clock
                 if (!existing) {
-                    db.prepare(`INSERT INTO prompts (instance_id, step_id, started_by, text, options, kind, answered, created_at)
-                                VALUES (?, ?, ?, ?, ?, 'ask', 0, ?)`)
-                        .run(inst.id, inst.current, inst.started_by, step.text, JSON.stringify(step.options || []), now());
-                    logEvent(inst.id, inst.current, 'ask', { text: step.text, options: step.options || [] });
+                    // post the question — with the open flag from the step
+                    db.prepare(`INSERT INTO prompts
+              (instance_id, step_id, started_by, text, options, kind, open, answered, created_at)
+              VALUES (?, ?, ?, ?, ?, 'ask', ?, 0, ?)`)
+                        .run(inst.id, inst.current, inst.started_by, step.text,
+                            JSON.stringify(step.options || []), step.open ? 1 : 0, now());
+                    logEvent(inst.id, inst.current, 'ask',
+                        { text: step.text, options: step.options || [], open: !!step.open });
                     if (step.timeout_ms)
-                        db.prepare('UPDATE ritual_instances SET wait_until = ? WHERE id = ?')
-                            .run(now() + step.timeout_ms, inst.id);
-                    setStatus(inst.id, '💬 waiting for your answer: ' + step.text);
+                        db.prepare('UPDATE ritual_instances SET wait_until = ? WHERE id = ?').run(now() + step.timeout_ms, inst.id);
+                    setStatus(inst.id, '💬 ' + step.text);
                     return null;
                 }
 
-                // (b) answered: save the answer into instance state, then ROUTE.
-                // Per-answer branching: go where this answer points; if it has no
-                // specific route, fall back to next; if neither, end (safety net).
                 if (existing.answered) {
                     const state = JSON.parse(inst.state || '{}');
                     if (step.save_as) state[step.save_as] = existing.answer;
-                    db.prepare('UPDATE ritual_instances SET state = ? WHERE id = ?')
-                        .run(JSON.stringify(state), inst.id);
-                    logEvent(inst.id, inst.current, 'answer', { text: step.text, answer: existing.answer });
+                    db.prepare('UPDATE ritual_instances SET state = ? WHERE id = ?').run(JSON.stringify(state), inst.id);
+                    logEvent(inst.id, inst.current, 'answer',
+                        { text: step.text, answer: existing.answer, open: !!step.open });
+                    // open answers are free text → won't match a route → fall through to next
                     const routes = step.answer_routes || {};
                     return routes[existing.answer] || step.next || 'end';
                 }
 
-                // (c) not answered, but the timeout deadline passed: take that path
+                // still waiting — check timeout
                 if (step.timeout_ms && inst.wait_until && now() >= inst.wait_until) {
-                    db.prepare('UPDATE prompts SET answered = 1, answer = ? WHERE id = ?')
-                        .run('(timed out)', existing.id);
                     logEvent(inst.id, inst.current, 'timeout', { text: step.text });
-                    return step.on_timeout || step.next;
+                    db.prepare('UPDATE prompts SET answered = 1 WHERE id = ?').run(existing.id);   // close it
+                    return step.on_timeout || step.next || 'end';
                 }
-
-                return null;    // still waiting
+                return null;
             }
 
             // SENSE — read the latest value of a sensor, compare, and BRANCH.
@@ -158,40 +156,49 @@ function makeEngine(db) {
                         .run(now() + step.min_recheck_ms, inst.id);
                 return nextStep;
             }
-            case 'tend':
-            case 'attend': {
-                const rel = step.type === 'tend' ? 'you → plant' : 'plant → you';
-
-                if (!step.confirm) {
-                    // no confirmation: show the instruction and move on (like a say)
-                    logEvent(inst.id, inst.current, step.type, { text: step.text, plant: step.plant, confirmed: false });
-                    setStatus(inst.id, (step.type === 'tend' ? '🌿 ' : '👁 ') + step.text);
-                    // brief linger so it can be read, same mechanism as say
-                    if (!inst._sayShown) {
-                        db.prepare('UPDATE ritual_instances SET wait_until = ? WHERE id = ?').run(now() + 4000, inst.id);
-                        return null;
-                    }
-                    return step.next;
-                }
-
-                // confirmation ON: post a prompt with a single "done" option, wait for it
-                const existing = db.prepare('SELECT * FROM prompts WHERE instance_id = ? AND step_id = ?')
+            // TEND — invite the human to ACT on the plant (UI→you→plant).
+            // No confirm: show + linger + move on. Confirm: post a "done" prompt and wait.
+            case 'tend': {
+                const existingTend = db.prepare('SELECT * FROM prompts WHERE instance_id = ? AND step_id = ?')
                     .get(inst.id, inst.current);
-
-                if (!existing) {
-                    db.prepare(`INSERT INTO prompts (instance_id, step_id, started_by, text, options, kind, answered, created_at)
-                      VALUES (?, ?, ?, ?, ?, 'ask', 0, ?)`)
+                if (!existingTend) {
+                    db.prepare(`INSERT INTO prompts
+              (instance_id, step_id, started_by, text, options, kind, open, answered, created_at)
+              VALUES (?, ?, ?, ?, ?, 'ask', 0, 0, ?)`)
                         .run(inst.id, inst.current, inst.started_by, step.text, JSON.stringify(['done']), now());
-                    logEvent(inst.id, inst.current, step.type, { text: step.text, plant: step.plant, confirmed: false });
-                    setStatus(inst.id, (step.type === 'tend' ? '🌿 ' : '👁 ') + step.text);
+                    logEvent(inst.id, inst.current, 'tend', { text: step.text, plant_name: step.plant_name });
+                    setStatus(inst.id, '🌿 ' + step.text);
                     return null;
                 }
-                if (existing.answered) {
-                    // the human confirmed — the human↔plant act is now recorded as done
-                    logEvent(inst.id, inst.current, step.type + '_confirmed', { text: step.text, plant: step.plant, confirmed: true });
+                if (existingTend.answered) {
+                    logEvent(inst.id, inst.current, 'tend_confirmed',
+                        { text: step.text, plant_name: step.plant_name });
                     return step.next;
                 }
-                return null;   // still waiting for confirmation
+                return null;
+            }
+
+            // ATTEND — invite the human to PERCEIVE the plant (UI→you←plant).
+            // Nothing mode: show + linger + move on. Open mode: post a text prompt, record the noticing.
+            case 'attend': {
+                const existingAtt = db.prepare('SELECT * FROM prompts WHERE instance_id = ? AND step_id = ?')
+                    .get(inst.id, inst.current);
+                if (!existingAtt) {
+                    const opts = step.open ? '[]' : JSON.stringify(['done']);
+                    db.prepare(`INSERT INTO prompts
+              (instance_id, step_id, started_by, text, options, kind, open, answered, created_at)
+              VALUES (?, ?, ?, ?, ?, 'ask', ?, 0, ?)`)
+                        .run(inst.id, inst.current, inst.started_by, step.text, opts, step.open ? 1 : 0, now());
+                    logEvent(inst.id, inst.current, 'attend', { text: step.text, plant_name: step.plant_name, open: !!step.open });
+                    setStatus(inst.id, '👁 ' + step.text);
+                    return null;
+                }
+                if (existingAtt.answered) {
+                    logEvent(inst.id, inst.current, 'attend_noticed',
+                        { text: step.text, plant_name: step.plant_name, noticed: existingAtt.answer, open: !!step.open });
+                    return step.next;
+                }
+                return null;
             }
             // END — finish the run. (Stop-button finishes are handled in server.js.)
             case 'end':
@@ -230,7 +237,7 @@ function makeEngine(db) {
                 // Tell runStep whether a wait/say's timer has elapsed. These flags
                 // live only for this tick (inst is re-fetched fresh each time).
                 inst._waiting = (step.type === 'wait' && inst.wait_until && now() >= inst.wait_until);
-                inst._sayShown = (['say','tend','attend'].includes(step.type) && inst.wait_until && now() >= inst.wait_until);
+                inst._sayShown = (['say', 'tend', 'attend'].includes(step.type) && inst.wait_until && now() >= inst.wait_until);
 
                 const next = runStep(inst, def, step);
 

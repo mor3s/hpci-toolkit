@@ -267,72 +267,73 @@ async function refreshTranscript() {
   if (runView === 'relations') document.getElementById('swimlane').innerHTML = renderSwimlane(events);
 }
 
-// map a diary event to its chain of pole-types, e.g. ['machine','human'] or ['machine','human','plant']
-function eventChain(e) {
+// map a diary event to its relationship(s) — each is a [from, to] pair of pole-types.
+// most events are one relationship; tend/attend confirmations are two.
+function eventChains(e) {
   switch (e.type) {
-    case 'say':             return ['machine','human'];
-    case 'ask':             return ['machine','human'];   // posing the question
-    case 'answer':          return ['human','machine'];
-    case 'sense':           return ['plant','machine'];
-    case 'act':             return ['machine','plant'];
-    case 'tend':
-    case 'tend_confirmed':  return ['machine','human','plant'];
-    case 'attend':
-    case 'attend_confirmed':return ['machine','human','plant'];
-    default:                return null;   // start/end/timeout — no relation arrow
+    case 'say':              return [['machine','human']];
+    case 'ask':              return [['machine','human']];
+    case 'answer':           return [['human','machine']];
+    case 'sense':            return [['plant','machine']];
+    case 'act':              return [['machine','plant']];
+    case 'tend':             return [['machine','human']];                    // invitation only
+    case 'tend_confirmed':   return [['human','plant'], ['human','machine']]; // acted, then reported
+    case 'attend':           return [['machine','human']];                    // invitation only
+    case 'attend_noticed':   return [['plant','human'], ['human','machine']]; // perceived, then reported
+    default:                 return [];   // start/end/timeout — no relation
   }
 }
-
 function eventShortLabel(e) {
   const p = e.payload || {};
   switch (e.type) {
     case 'say':    return 'says';
     case 'ask':    return 'asks';
     case 'answer': return '"' + (p.answer || '') + '"';
-    case 'sense':  return p.sensor + ' ' + (p.passed ? '✓' : '✗');
+    case 'sense':  return p.sensor;
     case 'act':    return 'set ' + p.output;
-    case 'tend':   case 'tend_confirmed':   return 'tend';
-    case 'attend': case 'attend_confirmed': return 'attend';
+    case 'tend':            return 'tend: ' + (p.text || '');
+    case 'tend_confirmed':  return 'tended';
+    case 'attend':          return 'attend: ' + (p.text || '');
+    case 'attend_noticed':  return 'noticed';
     default: return e.type;
   }
 }
 
 function renderSwimlane(events) {
-  // lanes: machine in the middle (mediation reads naturally)
   const laneX = { machine: 240, human: 60, plant: 420 };
   const laneColor = { human: '#5a7a52', plant: '#3d5a34', machine: '#8a7a5c' };
   const laneLabel = { human: '🧑 you', machine: '🖥️ machine', plant: '🌱 plant' };
   const W = 480, rowH = 46, topPad = 50;
 
-  // build the ordered list of relational events, collapsing consecutive same-sensor senses
-  const rel = [];
+  // build the flat list of relationship-rows, collapsing consecutive same-sensor senses
+  const rows = [];
   let i = 0;
   while (i < events.length) {
     const e = events[i];
-    const chain = eventChain(e);
-    if (!chain) { i++; continue; }
+    const chains = eventChains(e);
+    if (chains.length === 0) { i++; continue; }
+
     if (e.type === 'sense') {
       let j = i;
       while (j < events.length && events[j].type === 'sense' && events[j].payload.sensor === e.payload.sensor) j++;
       const run = events.slice(i, j);
       const last = run[run.length - 1];
-      rel.push({ chain, label: last.payload.sensor + (run.length > 1 ? ` ×${run.length}` : '') +
-                 (last.payload.passed ? ' ✓' : ' ✗'), e: last });
+      rows.push({ pair: ['plant','machine'],
+        label: last.payload.sensor + (run.length > 1 ? ` ×${run.length}` : '') + (last.payload.passed ? ' ✓' : ' ✗') });
       i = j;
     } else {
-      rel.push({ chain, label: eventShortLabel(e), e });
+      chains.forEach(pair => rows.push({ pair, label: eventShortLabel(e) }));
       i++;
     }
   }
 
-  if (rel.length === 0) return '<p class="muted">No relational events in this run yet.</p>';
+  if (rows.length === 0) return '<p class="muted">No relational events in this run yet.</p>';
 
-  const H = topPad + rel.length * rowH + 20;
-
-  // lane header lines + labels
+  const H = topPad + rows.length * rowH + 20;
   let svg = `<svg viewBox="0 0 ${W} ${H}" style="max-width:100%;font-family:var(--sans)">
     <defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto">
       <path d="M0,0 L7,3 L0,6 Z" fill="var(--ink)"/></marker></defs>`;
+
   for (const lane of ['human','machine','plant']) {
     svg += `<line x1="${laneX[lane]}" y1="${topPad-10}" x2="${laneX[lane]}" y2="${H-10}"
               stroke="${laneColor[lane]}" stroke-width="1" opacity="0.3"/>`;
@@ -340,25 +341,15 @@ function renderSwimlane(events) {
               fill="${laneColor[lane]}" font-weight="600">${laneLabel[lane]}</text>`;
   }
 
-  // one row per relational event: arrow(s) between lanes
-  rel.forEach((r, idx) => {
+  rows.forEach((r, idx) => {
     const y = topPad + idx * rowH;
-    // draw an arrow for each hop in the chain (2 poles = 1 hop; 3 = 2 hops)
-    for (let h = 0; h < r.chain.length - 1; h++) {
-      const from = laneX[r.chain[h]], to = laneX[r.chain[h+1]];
-      const yy = y + h * 14;   // stagger multi-hop chains slightly
-      svg += `<line x1="${from}" y1="${yy}" x2="${to}" y2="${yy}"
-                stroke="var(--ink)" stroke-width="1.5" marker-end="url(#arrow)"/>`;
-      // dot at the origin
-      svg += `<circle cx="${from}" cy="${yy}" r="3" fill="${laneColor[r.chain[h]]}"/>`;
-    }
-    // label near the first hop
-    const lx = (laneX[r.chain[0]] + laneX[r.chain[1]]) / 2;
-    svg += `<text x="${lx}" y="${y - 4}" text-anchor="middle" font-size="11" fill="var(--bark)">${r.label}</text>`;
+    const from = laneX[r.pair[0]], to = laneX[r.pair[1]];
+    svg += `<line x1="${from}" y1="${y}" x2="${to}" y2="${y}" stroke="var(--ink)" stroke-width="1.5" marker-end="url(#arrow)"/>`;
+    svg += `<circle cx="${from}" cy="${y}" r="3" fill="${laneColor[r.pair[0]]}"/>`;
+    const lx = (from + to) / 2;
+    svg += `<text x="${lx}" y="${y - 6}" text-anchor="middle" font-size="11" fill="var(--bark)">${r.label}</text>`;
   });
 
-  // arrowhead marker
-  
   svg += `</svg>`;
   return svg;
 }
@@ -399,7 +390,6 @@ function renderEvent(e) {
   const p = e.payload || {};
   const H = currentUser ? currentUser.name : 'you';
   let body, chain = null;
-
   switch (e.type) {
     case 'say':
       body = eventLine('🌱 ' + p.text, 'computer', t);
@@ -415,22 +405,40 @@ function renderEvent(e) {
       break;
     case 'act':
       body = eventLine('💡 set ' + p.output + ' → rgb(' + p.color.r + ',' + p.color.g + ',' + p.color.b + ')', 'machine', t);
-      chain = [{type:'machine',name:p.device||'device'}, {type:'plant',name:'the plant'}];
+      chain = [{type:'machine',name:p.device||'device'}, {type:'plant',name:p.plant_name||'the plant'}];
       break;
     case 'sense':
       body = eventLine('📈 ' + p.sensor + ' = ' + p.value + (p.passed!==undefined ? (p.passed?' ✓':' ✗') : ''), 'machine', t);
-      chain = [{type:'plant',name:'the plant'}, {type:'machine',name:p.device||'device'}];
+      chain = [{type:'plant',name:p.plant_name||'the plant'}, {type:'machine',name:p.device||'device'}];
       break;
+
+    // TEND — the invitation (UI→you→plant), then the confirmed act (you→plant)
     case 'tend':
-    case 'tend_confirmed':
       body = eventLine('🌿 ' + p.text, 'computer', t);
-      chain = [{type:'machine',name:'UI'}, {type:'human',name:H}, {type:'plant',name:p.plant_name||'the plant'}];
+      chain = [{type:'machine',name:'UI'}, {type:'human',name:H}];   // UI → you (just the request)
       break;
+    case 'tend_confirmed':
+      body = eventLine('🧑 done: <span class="muted">' + p.text + '</span>', 'human', t);
+      // two distinct relationships, both from Nour — not a chain through the plant
+      chain = null;
+      return `<div>${body}
+        <div style="margin:-2px 0 2px 24px">${relationTag([{type:'human',name:H},{type:'plant',name:p.plant_name||'the plant'}])}</div>
+        <div style="margin:0 0 8px 24px">${relationTag([{type:'human',name:H},{type:'machine',name:'UI'}])}</div>
+      </div>`;
+
+    // ATTEND — the invitation to notice (UI→you→plant), then the noticing itself (plant→you)
     case 'attend':
-    case 'attend_confirmed':
       body = eventLine('👁 ' + p.text, 'computer', t);
-      chain = [{type:'machine',name:'UI'}, {type:'human',name:H}, {type:'plant',name:p.plant_name||'the plant'}];
+      chain = [{type:'machine',name:'UI'}, {type:'human',name:H}];   // UI → you (just the request)
       break;
+    case 'attend_noticed':
+      body = eventLine('🧑 noticed: “' + (p.noticed || '') + '”', 'human', t);
+      chain = null;
+      return `<div>${body}
+        <div style="margin:-2px 0 2px 24px">${relationTag([{type:'plant',name:p.plant_name||'the plant'},{type:'human',name:H}])}</div>
+        <div style="margin:0 0 8px 24px">${relationTag([{type:'human',name:H},{type:'machine',name:'UI'}])}</div>
+      </div>`;
+
     case 'timeout': body = eventLine('⏱ no answer in time', 'machine', t); break;
     case 'start':   body = eventLine('— ritual started —', 'machine', t); break;
     case 'end':     body = eventLine('— ritual ended —', 'machine', t); break;
@@ -465,21 +473,43 @@ async function checkPrompts() {
       if (shownPromptId !== null) { box.style.display = 'none'; box.innerHTML = ''; shownPromptId = null; }
       return;
     }
-    if (question.id === shownPromptId) return;          // same question — leave the DOM alone
+    if (question.id === shownPromptId) return;      // same question — leave the DOM alone
 
     shownPromptId = question.id;
     box.style.display = 'block';
-    box.innerHTML =
-      `<p style="margin:0 0 8px"><strong>${question.text}</strong></p>` +
-      question.options.map(o => `<button onclick="answerPrompt(${question.id}, '${o}')">${o}</button>`).join(' ');
+    if (question.open) {
+      // open response — a text field + Send (non-empty required)
+      box.innerHTML =
+        `<p style="margin:0 0 8px"><strong>${question.text}</strong></p>
+         <input id="openAnswer" placeholder="type your answer…" style="width:100%;margin-bottom:8px"
+                onkeydown="if(event.key==='Enter')answerOpen(${question.id})">
+         <button onclick="answerOpen(${question.id})">Send</button>`;
+    } else {
+      // choice response — one button per option
+      box.innerHTML =
+        `<p style="margin:0 0 8px"><strong>${question.text}</strong></p>` +
+        question.options.map(o => `<button onclick="answerPrompt(${question.id}, '${o}')">${o}</button>`).join(' ');
+    }
   } catch (e) {
     console.error('checkPrompts', e);
   }
 }
 
+async function answerOpen(id) {
+  const val = document.getElementById('openAnswer').value.trim();
+  if (!val) return;                       // non-empty required
+  await fetch('/prompts/' + id + '/answer', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ answer: val }) });
+  checkPrompts();
+}
 
-
-
+async function answerPrompt(id, answer) {
+  await fetch('/prompts/' + id + '/answer', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ answer }) });
+  checkPrompts();      // refresh immediately so the box clears/advances
+}
 
 
 

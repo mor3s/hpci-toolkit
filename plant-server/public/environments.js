@@ -30,10 +30,18 @@ async function openEnvironment(id, name) {
   showView('environmentView');
   document.getElementById('envTitle').textContent = '🪴 ' + name;
   renderEnvDevices();
-  renderEnvPlants();            // NEW
+  renderEnvPlants();
   const devices = await (await fetch('/users/' + currentUser.id + '/devices')).json();
-  document.getElementById('envAttachPicker').innerHTML =
-    devices.map(d => `<option value="${d.id}">${d.name} (${d.id})</option>`).join('');
+  const picker = document.getElementById('envAttachPicker');
+  const attachRow = document.getElementById('envAttachRow');
+  if (devices.length === 0) {
+    attachRow.innerHTML = `<p class="muted">No devices yet.
+      <button class="small-btn" onclick="showView('devicesView'); loadDevices()">Register a device →</button></p>`;
+  } else {
+    attachRow.innerHTML =
+      `<select id="envAttachPicker">${devices.map(d => `<option value="${d.id}">${d.name} (${d.id})</option>`).join('')}</select>
+       <button onclick="attachToEnv()">Attach to environment</button>`;
+  }
 }
 async function renderEnvDevices() {
   const rows = await (await fetch('/environments/' + currentEnv.id + '/devices')).json();
@@ -62,10 +70,3 @@ async function attachToEnv() {
 }
 
 
-async function detachDevice(deviceId, event) {
-  event.stopPropagation();
-  await fetch('/devices/' + deviceId + '/detach', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
-  renderPlantDevices();
-  loadPlantSensors();     // its data no longer belongs to this plant
-}

@@ -193,14 +193,19 @@ app.get('/plants', (req, res) => {
     .all(req.query.user_id));
 });
 
-// which devices are attached to a given plant
-app.get('/plants/:id/devices', (req, res) => {
-  const plant = db.prepare('SELECT environment_id FROM plants WHERE id = ?').get(req.params.id);
+// a plant's devices = attached directly to it + attached to its environment
+function plantDeviceIds(plantId) {
+  const plant = db.prepare('SELECT environment_id FROM plants WHERE id = ?').get(plantId);
   const envId = plant ? plant.environment_id : null;
-  res.json(db.prepare(`
+  return db.prepare(`
     SELECT device_id, target_type FROM attachments
     WHERE (target_type='plant' AND target_id=?) OR (target_type='environment' AND target_id=?)
-  `).all(req.params.id, envId));
+  `).all(plantId, envId);
+}
+
+// which devices are attached to a given plant
+app.get('/plants/:id/devices', (req, res) => {
+  res.json(plantDeviceIds(req.params.id));
 });
 app.post('/devices/:id/detach', (req, res) => {
   db.prepare('DELETE FROM attachments WHERE device_id = ?').run(req.params.id);
@@ -231,16 +236,10 @@ app.get('/environments/:id/devices', (req, res) => {
   res.json(db.prepare(`SELECT device_id FROM attachments
     WHERE target_type = 'environment' AND target_id = ?`).all(req.params.id));
 });
-// all sensor names available for a plant = union across its devices (own + environment's)
+// all sensor names available for a plant = union across its devices
 app.get('/plants/:id/sensors', (req, res) => {
-  const plant = db.prepare('SELECT environment_id FROM plants WHERE id = ?').get(req.params.id);
-  const envId = plant ? plant.environment_id : null;
-  const devices = db.prepare(`
-    SELECT device_id FROM attachments
-    WHERE (target_type='plant' AND target_id=?) OR (target_type='environment' AND target_id=?)
-  `).all(req.params.id, envId).map(r => r.device_id);
+  const devices = plantDeviceIds(req.params.id).map(d => d.device_id);
   if (devices.length === 0) return res.json([]);
-
   const placeholders = devices.map(() => '?').join(',');
   const rows = db.prepare(
     `SELECT DISTINCT sensor_name FROM readings WHERE device_id IN (${placeholders})`
@@ -250,19 +249,12 @@ app.get('/plants/:id/sensors', (req, res) => {
 
 // readings for one sensor on a plant (across all its devices), oldest first
 app.get('/plants/:id/readings', (req, res) => {
-  const sensor = req.query.sensor;
-  const plant = db.prepare('SELECT environment_id FROM plants WHERE id = ?').get(req.params.id);
-  const envId = plant ? plant.environment_id : null;
-  const devices = db.prepare(`
-    SELECT device_id FROM attachments
-    WHERE (target_type='plant' AND target_id=?) OR (target_type='environment' AND target_id=?)
-  `).all(req.params.id, envId).map(r => r.device_id);
+  const devices = plantDeviceIds(req.params.id).map(d => d.device_id);
   if (devices.length === 0) return res.json([]);
-
   const placeholders = devices.map(() => '?').join(',');
   const rows = db.prepare(
     `SELECT * FROM readings WHERE sensor_name = ? AND device_id IN (${placeholders}) ORDER BY ts ASC`
-  ).all(sensor, ...devices);
+  ).all(req.query.sensor, ...devices);
   res.json(rows);
 });
 // ============================================================================

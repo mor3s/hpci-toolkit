@@ -33,15 +33,57 @@ async function login() {
     body: JSON.stringify({ name })
   });
   currentUser = await res.json();
-  renderIdentity();                 // show who's present
-  showView('plantsView');
+  renderIdentity();
+  switchTab('plants');       // start on plants (the workflow's first step)
   loadPlants();
 }
 
+
+
 function renderIdentity() {
   const bar = document.getElementById('identityBar');
-  if (!currentUser) { bar.style.display = 'none'; return; }
+  const tabs = document.getElementById('mainTabs');
+  if (!currentUser) { bar.style.display = 'none'; tabs.style.display = 'none'; return; }
   bar.style.display = 'flex';
-  bar.innerHTML = `<span class="who-label">You</span>
-                   <span class="who-name">🧑 ${currentUser.name}</span>`;
+  tabs.style.display = 'flex';
+  bar.innerHTML = `
+    <span class="who-label">You</span>
+    <span class="who-name">🧑 ${currentUser.name}</span>
+    <button class="logout-btn" onclick="logout()">log out</button>`;
+}
+
+function logout() {
+  currentUser = null;
+  currentDevice = null;
+  currentSensor = null;
+  currentPlant = null;
+  showView('loginView');
+  renderIdentity();               // hides the bar + tabs
+  document.getElementById('nameInput').value = '';
+}
+
+// ---- shared relationship rendering (used by rituals.js and builder preview) ----
+// the three agents and their glyphs
+const POLE_GLYPH = { human: '🧑', plant: '🌱', machine: '🖥️' };
+
+// render a chain of poles as a directed tag, e.g. 🖥️ UI → 🧑 Nour → 🌱 Basil
+// each pole: { type:'human'|'plant'|'machine', name:'...' }
+function relationTag(chain) {
+  if (!chain) return '';
+  return `<span class="relation">` +
+    chain.map(p => `<span class="pole pole-${p.type}">${POLE_GLYPH[p.type]} ${p.name}</span>`)
+         .join('<span class="rel-arrow">→</span>') +
+    `</span>`;
+}
+
+function goHome() {
+  if (!currentUser) return;
+  switchTab('plants');
+}
+
+function switchTab(which) {
+  document.getElementById('tabPlants').classList.toggle('active', which === 'plants');
+  document.getElementById('tabRituals').classList.toggle('active', which === 'rituals');
+  if (which === 'plants')  { showView('plantsView'); loadPlants(); }
+  if (which === 'rituals') { showView('ritualsView'); loadRuns(); }
 }

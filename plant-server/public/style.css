@@ -246,3 +246,44 @@ hr { border: none; border-top: 1px solid var(--line); margin: var(--s5) 0; }
 .pole-plant   { background: #eaf3e6; color: #3d5a34; }
 .pole-machine { background: #f0ece2; color: var(--bark); }
 .rel-arrow { color: var(--bark); font-size: 11px; }
+
+.tabs { display: flex; gap: 6px; margin-bottom: 16px; }
+.tab {
+  flex: 1; padding: 10px; border: 1px solid var(--line); background: transparent;
+  border-radius: 10px; font-family: var(--serif); font-size: 15px; color: var(--bark); cursor: pointer;
+}
+.tab.active {
+  background: var(--moss); color: #fff; border-color: var(--moss);
+}
+
+.utility-links {
+  margin-top: 24px;
+  display: flex;
+  gap: 10px;
+}
+.utility-links button {
+  flex: 1;
+  padding: 12px;
+  border: 1px solid var(--line);
+  background: transparent;
+  border-radius: 10px;
+  font-size: 14px;
+  color: var(--bark);
+  cursor: pointer;
+}
+.utility-links button:hover {
+  background: rgba(90, 122, 82, 0.06);
+  border-color: var(--moss);
+}
+
+.logout-btn {
+  margin-left: auto;              /* pushes it to the far right of the bar */
+  padding: 6px 12px;
+  border: 1px solid var(--line);
+  background: transparent;
+  border-radius: 8px;
+  font-size: 13px;
+  color: var(--bark);
+  cursor: pointer;
+}
+.logout-btn:hover { background: rgba(90,122,82,0.06); border-color: var(--moss); }
