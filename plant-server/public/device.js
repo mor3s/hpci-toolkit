@@ -134,7 +134,9 @@ function onSensorChange() {
 function goBack() {
   currentDevice = null; currentSensor = null;
   if (deviceReturnTo === 'plantView' && currentPlant) {
-    openPlant(currentPlant.id, currentPlant.name);   // return to the plant we came from
+    openPlant(currentPlant.id, currentPlant.name);
+  } else if (deviceReturnTo === 'meView') {
+    openMe();
   } else {
     showView('devicesView');
     loadDevices();

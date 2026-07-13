@@ -49,6 +49,7 @@ function renderIdentity() {
   bar.innerHTML = `
     <span class="who-label">You</span>
     <span class="who-name">🧑 ${currentUser.name}</span>
+    <button class="id-btn" onclick="openMe()">my devices</button>
     <button class="logout-btn" onclick="logout()">log out</button>`;
 }
 

@@ -277,7 +277,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: var(--s5) 0; }
 }
 
 .logout-btn {
-  margin-left: auto;              /* pushes it to the far right of the bar */
+  margin-left: 8px;               /* was auto — now just a small gap from id-btn */
   padding: 6px 12px;
   border: 1px solid var(--line);
   background: transparent;
@@ -287,3 +287,15 @@ hr { border: none; border-top: 1px solid var(--line); margin: var(--s5) 0; }
   cursor: pointer;
 }
 .logout-btn:hover { background: rgba(90,122,82,0.06); border-color: var(--moss); }
+
+.id-btn {
+  margin-left: auto;              /* pushes the button group to the right */
+  padding: 6px 12px;
+  border: 1px solid var(--moss);
+  background: transparent;
+  border-radius: 8px;
+  font-size: 13px;
+  color: var(--moss-dark, var(--moss));
+  cursor: pointer;
+}
+.id-btn:hover { background: rgba(90,122,82,0.08); }

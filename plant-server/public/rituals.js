@@ -22,6 +22,32 @@ async function openRituals() {
   loadRuns();
 }
 
+function eventRelationships(e) {
+  const p = e.payload || {};
+  const H  = { type: 'human',   name: (currentUser ? currentUser.name : 'you') };
+  const UI = { type: 'machine', name: 'UI' };
+  const dev = { type: 'machine', name: p.device || 'device' };
+  const plant = { type: 'plant', name: p.plant_name || 'the plant' };
+  const targetPole = p.target === 'human' ? H : plant;   // sense/act: plant or you
+
+  switch (e.type) {
+    case 'say':              return [[UI, H]];
+    case 'ask':              return [[UI, H]];                 // posing = UI→human
+    case 'answer':           return [[H, UI]];                 // answering = human→UI
+    case 'sense':            return [[targetPole, dev]];       // plant/you → device
+    case 'act':              return [[dev, targetPole]];       // device → plant/you
+    case 'tend':             return [[UI, H]];                 // invitation only
+    case 'tend_confirmed':   return [[H, plant], [H, UI]];     // acted, then reported
+    case 'attend':           return [[UI, H]];                 // invitation only
+    case 'attend_noticed':   return [[plant, H], [H, UI]];     // perceived, then reported
+    default:                 return [];                        // start/end/timeout — no relation
+  }
+}
+
+
+
+
+
 // ============================================================================
 //  THE RITUALS PAGE — live section, your rituals, past runs (all paginated)
 // ============================================================================
@@ -224,12 +250,12 @@ function ritualToMermaid(def) {
 }
 function relationText(s) {
   switch (s.type) {
-    case 'say':    return 'UI→you';
-    case 'ask':    return 'you→UI';
-    case 'sense':  return 'plant→device';
-    case 'act':    return 'device→plant';
-    case 'tend':   return 'UI→you→plant';
-    case 'attend': return 'UI→you←plant';
+    case 'say':    return 'machine to you';
+    case 'ask':    return 'you to machine';
+    case 'sense':  return (s.target === 'human' ? 'you to machine' : 'plant to machine');
+    case 'act':    return (s.target === 'human' ? 'machine to you' : 'machine to plant');
+    case 'tend':   return 'you to plant';
+    case 'attend': return 'plant to you';
     default: return '';
   }
 }
@@ -269,20 +295,12 @@ async function refreshTranscript() {
 
 // map a diary event to its relationship(s) — each is a [from, to] pair of pole-types.
 // most events are one relationship; tend/attend confirmations are two.
+// swimlane wants pole-TYPE pairs; derive them from the relationship model
 function eventChains(e) {
-  switch (e.type) {
-    case 'say':              return [['machine','human']];
-    case 'ask':              return [['machine','human']];
-    case 'answer':           return [['human','machine']];
-    case 'sense':            return [['plant','machine']];
-    case 'act':              return [['machine','plant']];
-    case 'tend':             return [['machine','human']];                    // invitation only
-    case 'tend_confirmed':   return [['human','plant'], ['human','machine']]; // acted, then reported
-    case 'attend':           return [['machine','human']];                    // invitation only
-    case 'attend_noticed':   return [['plant','human'], ['human','machine']]; // perceived, then reported
-    default:                 return [];   // start/end/timeout — no relation
-  }
+  return eventRelationships(e).map(chain => chain.map(pole => pole.type));
 }
+
+
 function eventShortLabel(e) {
   const p = e.payload || {};
   switch (e.type) {
@@ -318,7 +336,8 @@ function renderSwimlane(events) {
       while (j < events.length && events[j].type === 'sense' && events[j].payload.sensor === e.payload.sensor) j++;
       const run = events.slice(i, j);
       const last = run[run.length - 1];
-      rows.push({ pair: ['plant','machine'],
+      const relPair = eventChains(last)[0] || ['plant','machine'];
+      rows.push({ pair: relPair,
         label: last.payload.sensor + (run.length > 1 ? ` ×${run.length}` : '') + (last.payload.passed ? ' ✓' : ' ✗') });
       i = j;
     } else {
@@ -388,65 +407,30 @@ function renderTranscript(events) {
 function renderEvent(e) {
   const t = new Date(e.ts).toLocaleTimeString();
   const p = e.payload || {};
-  const H = currentUser ? currentUser.name : 'you';
-  let body, chain = null;
+
+  // the body text is event-specific (emoji + wording)
+  let body;
   switch (e.type) {
-    case 'say':
-      body = eventLine('🌱 ' + p.text, 'computer', t);
-      chain = [{type:'machine',name:'UI'}, {type:'human',name:H}];
-      break;
-    case 'ask':
-      body = eventLine('🌱 ' + p.text + '  <span class="muted">(' + (p.options||[]).join(' / ') + ')</span>', 'computer', t);
-      chain = [{type:'machine',name:'UI'}, {type:'human',name:H}];   // posing = UI→human
-      break;
-    case 'answer':
-      body = eventLine('🧑 ' + p.answer, 'human', t);
-      chain = [{type:'human',name:H}, {type:'machine',name:'UI'}];   // answering = human→UI
-      break;
-    case 'act':
-      body = eventLine('💡 set ' + p.output + ' → rgb(' + p.color.r + ',' + p.color.g + ',' + p.color.b + ')', 'machine', t);
-      chain = [{type:'machine',name:p.device||'device'}, {type:'plant',name:p.plant_name||'the plant'}];
-      break;
-    case 'sense':
-      body = eventLine('📈 ' + p.sensor + ' = ' + p.value + (p.passed!==undefined ? (p.passed?' ✓':' ✗') : ''), 'machine', t);
-      chain = [{type:'plant',name:p.plant_name||'the plant'}, {type:'machine',name:p.device||'device'}];
-      break;
-
-    // TEND — the invitation (UI→you→plant), then the confirmed act (you→plant)
-    case 'tend':
-      body = eventLine('🌿 ' + p.text, 'computer', t);
-      chain = [{type:'machine',name:'UI'}, {type:'human',name:H}];   // UI → you (just the request)
-      break;
-    case 'tend_confirmed':
-      body = eventLine('🧑 done: <span class="muted">' + p.text + '</span>', 'human', t);
-      // two distinct relationships, both from Nour — not a chain through the plant
-      chain = null;
-      return `<div>${body}
-        <div style="margin:-2px 0 2px 24px">${relationTag([{type:'human',name:H},{type:'plant',name:p.plant_name||'the plant'}])}</div>
-        <div style="margin:0 0 8px 24px">${relationTag([{type:'human',name:H},{type:'machine',name:'UI'}])}</div>
-      </div>`;
-
-    // ATTEND — the invitation to notice (UI→you→plant), then the noticing itself (plant→you)
-    case 'attend':
-      body = eventLine('👁 ' + p.text, 'computer', t);
-      chain = [{type:'machine',name:'UI'}, {type:'human',name:H}];   // UI → you (just the request)
-      break;
-    case 'attend_noticed':
-      body = eventLine('🧑 noticed: “' + (p.noticed || '') + '”', 'human', t);
-      chain = null;
-      return `<div>${body}
-        <div style="margin:-2px 0 2px 24px">${relationTag([{type:'plant',name:p.plant_name||'the plant'},{type:'human',name:H}])}</div>
-        <div style="margin:0 0 8px 24px">${relationTag([{type:'human',name:H},{type:'machine',name:'UI'}])}</div>
-      </div>`;
-
-    case 'timeout': body = eventLine('⏱ no answer in time', 'machine', t); break;
-    case 'start':   body = eventLine('— ritual started —', 'machine', t); break;
-    case 'end':     body = eventLine('— ritual ended —', 'machine', t); break;
-    default:        body = eventLine(e.type, 'machine', t);
+    case 'say':             body = eventLine('🌱 ' + p.text, 'computer', t); break;
+    case 'ask':             body = eventLine('🌱 ' + p.text + '  <span class="muted">(' + (p.options||[]).join(' / ') + ')</span>', 'computer', t); break;
+    case 'answer':          body = eventLine('🧑 ' + p.answer, 'human', t); break;
+    case 'act':             body = eventLine('💡 set ' + p.output + ' → rgb(' + p.color.r + ',' + p.color.g + ',' + p.color.b + ')', 'machine', t); break;
+    case 'sense':           body = eventLine('📈 ' + p.sensor + ' = ' + p.value + (p.passed!==undefined ? (p.passed?' ✓':' ✗') : ''), 'machine', t); break;
+    case 'tend':            body = eventLine('🌿 ' + p.text, 'computer', t); break;
+    case 'tend_confirmed':  body = eventLine('🧑 done: <span class="muted">' + p.text + '</span>', 'human', t); break;
+    case 'attend':          body = eventLine('👁 ' + p.text, 'computer', t); break;
+    case 'attend_noticed':  body = eventLine('🧑 noticed: “' + (p.noticed || '') + '”', 'human', t); break;
+    case 'timeout':         return eventLine('⏱ no answer in time', 'machine', t);
+    case 'start':           return eventLine('— ritual started —', 'machine', t);
+    case 'end':             return eventLine('— ritual ended —', 'machine', t);
+    default:                return eventLine(e.type, 'machine', t);
   }
-  return chain
-    ? `<div>${body}<div style="margin:-2px 0 8px 24px">${relationTag(chain)}</div></div>`
-    : body;
+
+  // the relationship tag(s) come from the ONE source of truth
+  const rels = eventRelationships(e);
+  const tags = rels.map(chain =>
+    `<div style="margin:-2px 0 2px 24px">${relationTag(chain)}</div>`).join('');
+  return `<div>${body}${tags}</div>`;
 }
 
 // voice -> CSS class: plant (serif), human (right bubble), machine (mono)

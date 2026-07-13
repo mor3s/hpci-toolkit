@@ -84,7 +84,7 @@
     <div id="plantData"></div>
 
   </div>
-
+  
   
   <!-- VIEW: environments -->
   <div id="environmentsView" class="view">
@@ -129,7 +129,21 @@
       <div id="outputControl"></div>
     </div>
   </div>
+  <!-- VIEW: you (the human) — your attached devices + your data -->
+  <div id="meView" class="view">
+    <button class="back" onclick="goHome()">← back</button>
+    <h2 id="meTitle"></h2>
 
+    <h3>Devices attached to you</h3>
+    <div id="meDevices"></div>
+    <h3>Attach a device to you</h3>
+    <select id="meAttachPicker"></select>
+    <button onclick="attachToMe()">Attach</button>
+
+    <h3>What you sense</h3>
+    <select id="meSensorPicker" onchange="onMeSensorChange()"></select>
+    <div id="meData"></div>
+  </div>
   <!-- VIEW 4: setup -->
   <div id="setupView" class="view">
     <button class="back" onclick="goBackToDevice()">← back</button>
@@ -182,7 +196,7 @@
     <label>Name</label>
     <input id="ritualNameInput" placeholder="Morning check">
 
-    <h3>Plants in this ritual</h3>
+    <h3>Ritual participants</h3>
     <div id="plantDeviceRoles"></div>
     <div class="row">
       <select id="plantPicker"></select>
@@ -196,13 +210,13 @@
     <div id="stepList"></div>
     <div class="row">
       <select id="newStepType">
-        <option value="say">say (UI → you)</option>
-        <option value="ask">ask (you → UI)</option>
+        <option value="say">say (machine → you)</option>
+        <option value="ask">ask (you → machine)</option>
+        <option value="sense">sense (plant/you → machine)</option>
+        <option value="act">act (machine → plant/you)</option>
         <option value="tend">tend (you → plant)</option>
         <option value="attend">attend (plant → you)</option>
         <option value="wait">wait</option>
-        <option value="act">act (device → plant)</option>
-        <option value="sense">sense (plant → device)</option>
       </select>
       <button onclick="addStep()">+ add step</button>
     </div>
@@ -249,6 +263,7 @@
   <script src="builder.js"></script>
   <script src="plants.js"></script>
   <script src="environments.js"></script>
+  <script src="user.js"></script>
 </body>
 
 </html>

@@ -87,8 +87,8 @@ Every ritual step enacts a directed relationship between two agents:
 |---|---|---|
 | **say** | machine → human | the interface shows a message |
 | **ask** | human → machine | the human answers (choice or open text) |
-| **sense** | plant → machine | a device reads the plant |
-| **act** | machine → plant | a device drives a light on the plant |
+| **sense** | plant → machine, or human → machine | a device reads the plant, or reads the human (button/dial/wearable) |
+| **act** | machine → plant, or machine → human | a device drives a light on the plant, or a light/buzzer toward the human |
 | **tend** | human → plant | the human is asked to act on the plant, and confirms |
 | **attend** | plant → human | the human is asked to notice the plant, and reports |
 
@@ -101,9 +101,30 @@ the interface; the human↔plant relationship happens in the middle, in the worl
 **always require a response** — the response is what enacts and evidences the
 relationship, so a tend/attend without one would be indistinguishable from a `say`.
 
+**Target and medium.** A device attaches to a plant, an environment, *or the human*
+(the `attachments.target_type`). So **sense** and **act** target whichever pole their
+device is attached to — a plant, or the human (a button/dial the person operates, an
+LED/buzzer aimed at them). The relationship a sense/act enacts therefore depends on its
+target: plant→machine / machine→plant, or human→machine / machine→human. These
+hardware human↔machine relationships are distinct from **say**/**ask**, which are the
+same directions but mediated by the **interface** (the machine pole is "UI", not a
+device). The transcript and swimlane distinguish them by the machine end's name (a device
+nickname vs. "UI"). A step's compiled form carries a `target` field (`plant` | `human`)
+so the views render the correct poles.
+
+**The human is always a participant.** Every ritual involves the human through the UI
+(say/ask/tend/attend), so "you" is a permanent presence — always shown in the builder's
+participant list (not opt-in), with any devices attached to you given read/write roles
+like a plant's. Only **tend** and **attend** are plant-only targets (they *are* the
+human↔plant relationships); sense/act may target the human, but tending or attending to
+yourself is not part of the model.
+
 These relationships are shown in the builder (step labels), the transcript (each event
 tagged with its pole chain), the diagram (edge labels), and the **swimlane** (a
 three-lane view where the interaction flows visibly between human, plant, and machine).
+On the event side (transcript + swimlane), all of these derive from one function,
+`eventRelationships(event)` in `rituals.js` — the single source of truth for what
+relationship an event enacts, so the views cannot drift apart.
 
 ---
 
@@ -176,6 +197,13 @@ All bodies JSON. Base URL is the server root.
 ### Users
 - `POST /users` `{name}` → `{id, name}` (create-or-fetch, idempotent).
 - `GET /users` — all users.
+- `GET /users/:id/attached-devices` — devices attached to the human (`target_type='human'`).
+- `GET /users/:id/sensors` — sensor names across the human's attached devices.
+- `GET /users/:id/readings?sensor=` — readings for one sensor across the human's devices.
+
+(A device attaches to the human via `POST /devices/:id/attach` with
+`target_type: 'human'`, `target_id: <user id>` — the same endpoint used for plants and
+environments.)
 
 ### Plants
 - `POST /plants` `{user_id, name, environment_id?}` → `{id, name}`.
@@ -282,8 +310,9 @@ running rituals.
 
 ### The event diary & relationships
 Every step logs to `ritual_events`. Event types and key payloads: `start`; `say`{text};
-`ask`{text,options,open}; `answer`{answer,open}; `act`{output,color,device,plant_name};
-`sense`{sensor,value,passed,device,plant_name}; `tend`{text,plant_name};
+`ask`{text,options,open}; `answer`{answer,open};
+`act`{output,color,device,target,plant_name}; `sense`{sensor,value,passed,device,target,plant_name};
+`tend`{text,plant_name};
 `tend_confirmed`{text,plant_name}; `attend`{text,plant_name,open};
 `attend_noticed`{noticed,plant_name}; `timeout`; `end`.
 
@@ -330,9 +359,11 @@ Adding a new sensor `source` = a new branch in the read dispatch (see §9).
 Plain JS, no build step; all `public/*.js` share one global scope, loaded in order by
 `index.html` (`app.js` first). Files: `app.js` (shared state, tabs, login, relationship
 rendering — `relationTag`/`POLE_GLYPH`); `plants.js` (plant home + plant pages, where data
-lives); `environments.js`; `devices.js`, `device.js` (graph, light, lock); `setup.js`
-(no-code setup + pin allocator); `rituals.js` (rituals page, transcript, swimlane,
-preview, prompt box); `builder.js` (the visual builder).
+lives); `me.js` (the "you" page — the human's attached devices + data, mirroring a plant
+page, reached from the identity bar); `environments.js`; `devices.js`, `device.js` (graph,
+light, lock); `setup.js` (no-code setup + pin allocator); `rituals.js` (rituals page,
+transcript, swimlane, preview, prompt box, and `eventRelationships` — the single source of
+truth for event relationships); `builder.js` (the visual builder).
 
 **Navigation:** a two-tab home — **Plants** and **Rituals**, the two central acts —
 with Environments and Devices as secondary buttons. The title returns to the plants tab;
@@ -421,9 +452,13 @@ families, a spacing scale). Reskinning is editing those.
 - **p5.js claims common globals** (`line`, `text`, `map`, `width`…) — prefix your own
   helpers (`eventLine`).
 - **DOM values are strings** — compare `Number(x) === id`, not `===` against DB numbers.
-- **The relationship encoding lives in several places** (`rituals.js`: the transcript
-  cases, `eventChains`, `relationText`, `previewChain`). Adding a step type means updating
-  all of them — keep them in sync (a candidate for future unification).
+- **Relationship encoding — event side unified, definition side not yet.** The
+  transcript and swimlane both derive from one function, `eventRelationships(event)` in
+  `rituals.js` — so those cannot drift. But the ritual *diagram* (`relationText`) and
+  *preview* (`previewChain`) still encode the step→relationship mapping separately (they
+  work on definitions, not events). Adding a step type or changing a relationship means
+  updating `eventRelationships` *and* those two definition-side functions. Unifying the
+  definition side into a parallel `stepRelationships(step)` is a sensible future step.
 - **The `say`/tend/attend linger** relies on `wait_until` being 0 on entry; documented in
   the engine.
 - **sense reads only the latest reading** — if a sensor has never reported, the value is

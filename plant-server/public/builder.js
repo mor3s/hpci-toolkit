@@ -28,12 +28,20 @@ async function openBuilder() {
   document.getElementById('builderMessage').textContent = '';
   selectedPlants = {};
 
+  // the human is ALWAYS part of the ritual — seed "self" with your attached devices
+  const myDevices = await (await fetch('/users/' + currentUser.id + '/attached-devices')).json();
+  selectedPlants['self'] = {
+    name: currentUser.name,
+    isSelf: true,
+    devices: myDevices.map(d => ({ device_id: d.device_id, target_type: 'human', role: 'read' }))
+  };
+
   const plants = await (await fetch('/plants?user_id=' + currentUser.id)).json();
   const picker = document.getElementById('plantPicker');
   picker.innerHTML = plants.length === 0
     ? '<option value="">— no plants yet —</option>'
     : plants.map(p => `<option value="${p.id}">🌱 ${p.name}</option>`).join('');
-  renderPlantDeviceRoles();
+  renderPlantDeviceRoles();          // will show "you" (always) + any added plants
 }
 
 async function addPlantToRitual() {
@@ -50,6 +58,7 @@ async function addPlantToRitual() {
 }
 
 function removePlantFromRitual(plantId) {
+  if (plantId === 'self') return;      // the human is always part of the ritual
   delete selectedPlants[plantId];
   renderPlantDeviceRoles();
 }
@@ -61,12 +70,13 @@ function setDeviceRole(plantId, deviceIndex, role) {
 function renderPlantDeviceRoles() {
   const box = document.getElementById('plantDeviceRoles');
   const ids = Object.keys(selectedPlants);
-  if (ids.length === 0) { box.innerHTML = '<p class="muted">No plants added yet.</p>'; return; }
 
   box.innerHTML = ids.map(pid => {
     const p = selectedPlants[pid];
     const rows = p.devices.length === 0
-      ? '<p class="muted" style="margin:4px 0">No devices attached to this plant.</p>'
+      ? (p.isSelf
+          ? '<p class="muted" style="margin:4px 0">No devices attached to you. (You\'re still part of the ritual through the interface.)</p>'
+          : '<p class="muted" style="margin:4px 0">No devices attached to this plant.</p>')
       : p.devices.map((d, i) => {
           const shared = d.target_type === 'environment';
           return `<div style="margin:4px 0">
@@ -81,8 +91,8 @@ function renderPlantDeviceRoles() {
         }).join('');
     return `<div class="step">
       <div class="step-head">
-        <span class="step-num">🌱 ${p.name}</span>
-        <button class="step-remove" onclick="removePlantFromRitual('${pid}')">remove</button>
+        <span class="step-num">${p.isSelf ? '🧑 ' + p.name : '🌱 ' + p.name}</span>
+        ${p.isSelf ? '' : `<button class="step-remove" onclick="removePlantFromRitual('${pid}')">remove</button>`}
       </div>
       <div class="step-body">${rows}</div>
     </div>`;
@@ -101,7 +111,11 @@ async function confirmDevices() {
 
   draft.plants = {};
   for (const [pid, p] of Object.entries(selectedPlants)) {
-    draft.plants['p' + pid] = { plant_id: Number(pid), name: p.name };
+    if (p.isSelf) {
+      draft.plants['self'] = { is_self: true, name: p.name };
+    } else {
+      draft.plants['p' + pid] = { plant_id: Number(pid), name: p.name };
+    }
   }
 
   // resolve devices + roles into the engine's device header (alias → device + role)
@@ -128,13 +142,14 @@ async function confirmDevices() {
     for (const d of p.devices) {
       const cfg = await (await fetch('/devices/' + d.device_id + '/config')).json();
       (cfg.inputs || []).forEach(i => sensors.push({ name: i.name, device_id: d.device_id, interval_ms: i.interval_ms }));
-      if (d.target_type !== 'environment')     // can't act through a shared device
+      if (d.target_type !== 'environment')
         (cfg.outputs || []).forEach(o => outputs.push({ name: o.name, device_id: d.device_id }));
     }
-    draft.plantIO['p' + pid] = { sensors, outputs, name: p.name };
+    const key = p.isSelf ? 'self' : 'p' + pid;
+    draft.plantIO[key] = { sensors, outputs, name: p.name, isSelf: !!p.isSelf };
   }
 
-  document.getElementById('builderMessage').textContent = 'Plants confirmed. Now add steps below.';
+  document.getElementById('builderMessage').textContent = 'Participants confirmed. Now add steps below.';
   renderSteps();
 }
 
@@ -230,7 +245,7 @@ function renderSteps() {
 
     if (s.type === 'act')
       fields = `
-        <label>On which plant</label>
+        <label>Act on</label>
         ${plantDropdown(s)}
         <label>Turn on which light / output</label>
         ${ioDropdown(s, 'output')}
@@ -239,7 +254,7 @@ function renderSteps() {
 
     if (s.type === 'sense')
       fields = `
-        <label>Read from which plant</label>
+        <label>Sense from</label>
         ${plantDropdown(s)}
         <label>Which sensor</label>
         ${ioDropdown(s, 'sensor')}
@@ -254,7 +269,7 @@ function renderSteps() {
     if (s.type === 'tend')
       fields = `
         <label>Which plant</label>
-        ${plantDropdown(s)}
+        ${plantOnlyDropdown(s)}
         <label>What to ask the person to do to the plant</label>
         <input placeholder="e.g. Give Basil some water." value="${s.text}"
                oninput="editStep('${s.id}','text',this.value)">
@@ -263,7 +278,7 @@ function renderSteps() {
     if (s.type === 'attend')
       fields = `
         <label>Which plant</label>
-        ${plantDropdown(s)}
+        ${plantOnlyDropdown(s)}
         <label>What to ask the person to notice</label>
         <input placeholder="e.g. Sit with Basil. Notice the colour of its leaves." value="${s.text}"
                oninput="editStep('${s.id}','text',this.value)">
@@ -324,9 +339,9 @@ function renderWiring(s) {
 function plantDropdown(s) {
   const plants = draft.plantIO || {};
   return `<select onchange="editStep('${s.id}','plant',this.value)">
-    <option value="">— plant —</option>
+    <option value="">— target —</option>
     ${Object.entries(plants).map(([alias, p]) =>
-      `<option value="${alias}" ${s.plant===alias?'selected':''}>🌱 ${p.name}</option>`).join('')}
+      `<option value="${alias}" ${s.plant===alias?'selected':''}>${p.isSelf ? '🧑 ' + p.name : '🌱 ' + p.name}</option>`).join('')}
   </select>`;
 }
 
@@ -508,20 +523,23 @@ function compileDraft() {
 
     if (s.type === 'wait') { out.duration_ms = +s.minutes * 60000; out.next = sid(s.next); }
 
-    if (s.type === 'act') {
-      const alias = Object.keys(draft.devices).find(a => draft.devices[a].device_id === s.device);
-      out.device = alias; out.output = s.output;
-      out.color = hexToRgb(s.color); out.next = sid(s.next);
-      out.plant_name = draft.plantIO[s.plant] ? draft.plantIO[s.plant].name : '';
-      out.device_name = s.device;
-    }
-
     if (s.type === 'sense') {
       const alias = Object.keys(draft.devices).find(a => draft.devices[a].device_id === s.device);
       out.device = alias; out.sensor = s.sensor; out.op = s.op; out.value = +s.value;
       out.then = sid(s.then); out.else = sid(s.else);
       out.min_recheck_ms = s.min_recheck_ms || 5000;
-      out.plant_name = draft.plantIO[s.plant] ? draft.plantIO[s.plant].name : '';
+      const io = draft.plantIO[s.plant];
+      out.target = io && io.isSelf ? 'human' : 'plant';       // NEW
+      out.plant_name = io ? io.name : '';
+      out.device_name = s.device;
+    }
+    if (s.type === 'act') {
+      const alias = Object.keys(draft.devices).find(a => draft.devices[a].device_id === s.device);
+      out.device = alias; out.output = s.output;
+      out.color = hexToRgb(s.color); out.next = sid(s.next);
+      const io = draft.plantIO[s.plant];
+      out.target = io && io.isSelf ? 'human' : 'plant';       // NEW
+      out.plant_name = io ? io.name : '';
       out.device_name = s.device;
     }
 
@@ -542,6 +560,21 @@ function compileDraft() {
 
   return { name: draft.name, devices: draft.devices, start: 's0', steps };
 }
+
+
+
+// plants only — for tend/attend, which are human↔PLANT relationships (never "you")
+function plantOnlyDropdown(s) {
+  const plants = draft.plantIO || {};
+  return `<select onchange="editStep('${s.id}','plant',this.value)">
+    <option value="">— plant —</option>
+    ${Object.entries(plants).filter(([, p]) => !p.isSelf).map(([alias, p]) =>
+      `<option value="${alias}" ${s.plant===alias?'selected':''}>🌱 ${p.name}</option>`).join('')}
+  </select>`;
+}
+
+
+
 
 // ============================================================================
 //  SAVE

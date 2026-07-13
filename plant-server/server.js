@@ -563,5 +563,32 @@ app.post('/prompts/:id/answer', (req, res) => {
   res.json({ ok: true });
 });
 
+
+// devices attached to a human (the user)
+app.get('/users/:id/attached-devices', (req, res) => {
+  res.json(db.prepare(`SELECT device_id, target_type FROM attachments
+    WHERE target_type = 'human' AND target_id = ?`).all(req.params.id));
+});
+
+// sensor names across the human's attached devices
+app.get('/users/:id/sensors', (req, res) => {
+  const devices = db.prepare(`SELECT device_id FROM attachments
+    WHERE target_type='human' AND target_id=?`).all(req.params.id).map(r => r.device_id);
+  if (devices.length === 0) return res.json([]);
+  const ph = devices.map(() => '?').join(',');
+  res.json(db.prepare(`SELECT DISTINCT sensor_name FROM readings WHERE device_id IN (${ph})`)
+    .all(...devices).map(r => r.sensor_name));
+});
+
+// readings for one sensor across the human's attached devices
+app.get('/users/:id/readings', (req, res) => {
+  const devices = db.prepare(`SELECT device_id FROM attachments
+    WHERE target_type='human' AND target_id=?`).all(req.params.id).map(r => r.device_id);
+  if (devices.length === 0) return res.json([]);
+  const ph = devices.map(() => '?').join(',');
+  res.json(db.prepare(`SELECT * FROM readings WHERE sensor_name = ? AND device_id IN (${ph}) ORDER BY ts ASC`)
+    .all(req.query.sensor, ...devices));
+});
+
 // ============================================================================
 app.listen(3000, () => console.log('listening on http://localhost:3000'));

@@ -69,7 +69,10 @@ function makeEngine(db) {
                   ON CONFLICT(device_id, output_name)
                   DO UPDATE SET desired = excluded.desired, updated_at = excluded.updated_at
                 `).run(deviceId, step.output, JSON.stringify(step.color), now());
-                logEvent(inst.id, inst.current, 'act', { device: deviceId, output: step.output, color: step.color });
+                logEvent(inst.id, inst.current, 'act', {
+  device: deviceId, output: step.output, color: step.color,
+  target: step.target || 'plant', plant_name: step.plant_name
+});
                 setStatus(inst.id, '💡 set ' + step.output);
                 return step.next;
             }
@@ -147,7 +150,8 @@ function makeEngine(db) {
                     else if (step.op === '=') passed = value === step.value;
                 }
                 logEvent(inst.id, inst.current, 'sense',
-                    { device: deviceId, sensor: step.sensor, op: step.op, threshold: step.value, value, passed });
+                    { device: deviceId, sensor: step.sensor, op: step.op, threshold: step.value,
+                      value, passed, target: step.target || 'plant', plant_name: step.plant_name });
                 setStatus(inst.id, '🔍 checking ' + step.sensor + (value !== null ? ' (' + value + ')' : ''));
 
                 const nextStep = passed ? step.then : step.else;

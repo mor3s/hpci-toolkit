@@ -91,6 +91,13 @@ the **human**, the **plant**, and the **machine**. Sensing is plant→machine; a
 machine→plant; saying is machine→human; asking is human→machine; tending is human→plant;
 attending is plant→human. The toolkit makes these visible — that's its research purpose.
 
+A device can attach to the **human** as well as to a plant, so **sense** and **act** can
+also point at *you* — a button or dial you operate (you→machine), or a light/buzzer aimed
+at you (machine→you) — through hardware, as distinct from *say*/*ask*, which reach you
+through the interface. You have a **"you" page** (tap "my devices" in the identity bar)
+that mirrors a plant page, and you're always a participant in every ritual. Only *tend*
+and *attend* are plant-only.
+
 ---
 
 ## Part 3 — What's supported out of the box
@@ -257,16 +264,18 @@ firmware to match — they must agree on which pins do what.
 
 ---
 
-## Part 6 — Run the server on a Raspberry Pi
+## Part 6 — Run a workshop (Raspberry Pi)
 
-
+For a workshop you don't want to depend on venue WiFi. Run the server on a Raspberry Pi
+that *is* the network:
 1. Make the Pi a WiFi access point (e.g. `nmcli device wifi hotspot`); it sits at a
    fixed address like `192.168.4.1`.
 2. Run the server on the Pi, ideally on **port 80** so phones type an address with no
    `:3000`.
 3. Auto-start it on boot (systemd or pm2) so it survives a reboot.
 4. Point the firmware's server address at the Pi.
-5. Confirm phones load the app, a board posts readings, a light responds 
+5. Pre-flight: confirm phones load the app, a board posts readings, a light responds —
+   before participants arrive.
 
 ---
 
@@ -295,7 +304,7 @@ firmware to match — they must agree on which pins do what.
 ## A note on the spirit of it
 
 This toolkit is deliberately simple and hackable — no build step, no framework, plain
-files you can read and change. So fork it, add the sensors *your*
+files you can read and change. That's an invitation: fork it, add the sensors *your*
 plants and questions need, change the words and the colours, and compose rituals that
 mean something in your context. The interesting work isn't the code — it's the kinds of
 attention and care the toolkit lets people practise, and the relationships it makes

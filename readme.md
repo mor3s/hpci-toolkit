@@ -141,8 +141,8 @@ ritual step enacts a directed relationship between two of them:
 |---|---|
 | **say** | machine to human (the interface tells you something) |
 | **ask** | human to machine (you answer the interface) |
-| **sense** | plant to machine (a device reads the plant) |
-| **act** | machine to plant (a device drives a light on the plant) |
+| **sense** | plant/human to machine (a device reads a plant — or reads you, via a button, dial, or wearable) |
+| **act** | machine to plant/human (a device drives a light on the plant — or a light/buzzer toward you) |
 | **tend** | human to plant (you're asked to *act on* the plant, and confirm) |
 | **attend** | plant to human (you're asked to *notice* the plant, and report) |
 
@@ -150,6 +150,17 @@ The last two can't be sensed by hardware — no wire runs between a human and a 
 so the toolkit *invites* them through the interface and records the human's confirmation
 or written noticing. That mediation (UI asks, human acts/perceives, human reports) is
 shown explicitly in the transcript and swimlane.
+
+**Devices can point at you, not just at plants.** A device attaches to a plant, an
+environment, *or the human*. So **sense** and **act** can target you as well as a plant —
+a button or dial you operate (you → machine, through hardware), or an LED/buzzer aimed at
+you (machine → you). This is distinct from *say*/*ask*, which are the same directions but
+mediated by the **interface** (UI) rather than a device — the transcript shows the
+difference by naming the machine end (a device's nickname vs. "UI"). You have a **"you"
+page** (reached from the identity bar) that mirrors a plant page: your attached devices
+and the data they sense about you. And you are *always* a participant in every ritual —
+through the UI if nothing else — so "you" is a permanent presence in the ritual builder,
+with your attached devices given read/write roles just like a plant's.
 
 ---
 
