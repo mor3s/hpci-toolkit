@@ -5,9 +5,11 @@
 #include <Adafruit_Sensor.h>
 #include <Adafruit_BME680.h>
 #include <Adafruit_ADS1X15.h>
+#include <ESP32Servo.h>
 
-const char* WIFI_SSID = "Wifi-Name";
-const char* WIFI_PASS = "Wifi-Pwd";
+
+const char* WIFI_SSID = "wifi-name";
+const char* WIFI_PASS = "password";
 const char* SERVER    = "http://192.168.137.1:3000";
 String deviceId = "device-id";  // change for each ESP
 
@@ -22,6 +24,22 @@ bool adsReady = false;
 
 unsigned long lastOutput = 0;
 const unsigned long OUTPUT_EVERY = 1000;   // check desired colors once a second
+
+Servo servos[4];              // up to 4 servos
+int   servoPins[4] = {-1,-1,-1,-1};
+int   servoCount = 0;
+
+Servo* servoForPin(int pin) {
+  for (int i = 0; i < servoCount; i++) if (servoPins[i] == pin) return &servos[i];
+  if (servoCount < 4) {                       // first time we see this pin: attach
+    servoPins[servoCount] = pin;
+    servos[servoCount].attach(pin);
+    return &servos[servoCount++];
+  }
+  return nullptr;
+}
+
+
 
 void fetchConfig() {
   HTTPClient http;
@@ -65,11 +83,17 @@ void setup() {
 
   // set up PWM for each output's three pins
   for (JsonObject output : config["outputs"].as<JsonArray>()) {
-    if (String(output["type"] | "") == "rgb") {
-      ledcAttach(output["pins"]["r"] | -1, 5000, 8);   // 5 kHz, 8-bit (0..255)
+    String ty = output["type"] | "";
+    if (ty == "rgb") {
+      ledcAttach(output["pins"]["r"] | -1, 5000, 8);
       ledcAttach(output["pins"]["g"] | -1, 5000, 8);
       ledcAttach(output["pins"]["b"] | -1, 5000, 8);
+    } else if (ty == "led" || ty == "buzzer") {
+      pinMode(output["pins"]["s"] | -1, OUTPUT);         // single on/off pin
+    } else if (ty == "servo") {
+      servoForPin(output["pins"]["s"] | -1);       // attach it now
     }
+    
   }
 }
 
@@ -80,14 +104,33 @@ void loop() {
   JsonArray readings = out["readings"].to<JsonArray>();
 
   for (JsonObject input : config["inputs"].as<JsonArray>()) {
-    unsigned long interval = input["interval_ms"] | sampleEvery;   // per-input, else global
-    unsigned long last     = input["_last"] | 0UL;                 // when we last read THIS one
-
-    if (now - last < interval) continue;       // not due yet — skip it
-    input["_last"] = now;                      // mark it read now
-
     String source = input["source"] | "";
     String nm     = input["name"]   | "?";
+
+    // DIGITAL inputs (button, mic-trigger): check EVERY pass, post on change + heartbeat
+    if (source == "digital") {
+      int pin = input["pin"] | -1;
+      if (pin >= 0) {
+        pinMode(pin, INPUT_PULLUP);
+        int state = digitalRead(pin);
+        int lastState = input["_lastState"] | -1;
+        unsigned long lastBeat = input["_lastBeat"] | 0UL;
+        unsigned long beatEvery = input["interval_ms"] | 5000;   // heartbeat interval
+
+        if (state != lastState || (now - lastBeat) >= beatEvery) {
+          input["_lastState"] = state;
+          input["_lastBeat"]  = now;
+          JsonObject r = readings.add<JsonObject>(); r["name"]=nm; r["value"]=state;
+        }
+      }
+      continue;   // handled — skip the normal interval gate below
+    }
+
+    // everything else: the normal per-interval gate
+    unsigned long interval = input["interval_ms"] | sampleEvery;
+    unsigned long last     = input["_last"] | 0UL;
+    if (now - last < interval) continue;
+    input["_last"] = now;
 
     if (source == "adc") {
       int pin = input["pin"] | -1;
@@ -134,24 +177,49 @@ void applyOutputs() {
 
   for (JsonObject output : config["outputs"].as<JsonArray>()) {
     String name = output["name"] | "";
-    if (String(output["type"] | "") != "rgb") continue;
-    if (!desired[name].is<JsonObject>()) continue;        // no color set for this output yet
+    String ty   = output["type"] | "";
+    if (!desired[name].is<JsonObject>()) continue;
 
-    int r = desired[name]["r"] | 0;
-    int g = desired[name]["g"] | 0;
-    int b = desired[name]["b"] | 0;
-
-    ledcWrite(output["pins"]["r"] | -1, r);               // drive each channel to its brightness
-    ledcWrite(output["pins"]["g"] | -1, g);
-    ledcWrite(output["pins"]["b"] | -1, b);
-
-    // report back what we actually set
-    JsonDocument rep; rep["r"] = r; rep["g"] = g; rep["b"] = b;
-    String repBody; serializeJson(rep, repBody);
-    HTTPClient rh;
-    rh.begin(String(SERVER) + "/devices/" + deviceId + "/outputs/" + name + "/reported");
-    rh.addHeader("Content-Type", "application/json");
-    rh.PUT(repBody);
-    rh.end();
+    if (ty == "rgb") {
+      int r = desired[name]["r"] | 0, g = desired[name]["g"] | 0, b = desired[name]["b"] | 0;
+      ledcWrite(output["pins"]["r"] | -1, r);
+      ledcWrite(output["pins"]["g"] | -1, g);
+      ledcWrite(output["pins"]["b"] | -1, b);
+      JsonDocument rep; rep["r"]=r; rep["g"]=g; rep["b"]=b;
+      String repBody; serializeJson(rep, repBody);
+      HTTPClient rh; rh.begin(String(SERVER) + "/devices/" + deviceId + "/outputs/" + name + "/reported");
+      rh.addHeader("Content-Type","application/json"); rh.PUT(repBody); rh.end();
+    }
+    else if (ty == "led" || ty == "buzzer") {
+      // single-pin output: ON if the desired colour is not black
+      int r = desired[name]["r"] | 0, g = desired[name]["g"] | 0, b = desired[name]["b"] | 0;
+      bool on = (r + g + b) > 0;
+      digitalWrite(output["pins"]["s"] | -1, on ? HIGH : LOW);
+      JsonDocument rep; rep["r"]=r; rep["g"]=g; rep["b"]=b;   // echo back what we got
+      String repBody; serializeJson(rep, repBody);
+      HTTPClient rh; rh.begin(String(SERVER) + "/devices/" + deviceId + "/outputs/" + name + "/reported");
+      rh.addHeader("Content-Type","application/json"); rh.PUT(repBody); rh.end();
+    } else if (ty == "servo") {
+      int angle = desired[name]["angle"] | -1;
+      if (angle >= 0 && angle <= 180) {
+        Servo* s = servoForPin(output["pins"]["s"] | -1);
+        if (s) s->write(angle);
+        JsonDocument rep; rep["angle"] = angle;                 // report back the angle
+        String repBody; serializeJson(rep, repBody);
+        HTTPClient rh; rh.begin(String(SERVER) + "/devices/" + deviceId + "/outputs/" + name + "/reported");
+        rh.addHeader("Content-Type","application/json"); rh.PUT(repBody); rh.end();
+      }
+    } else if (ty == "speaker") {
+      int freq = desired[name]["freq"] | 0;
+      int pin  = output["pins"]["s"] | -1;
+      if (pin >= 0) {
+        if (freq > 0) tone(pin, freq);      // play the pitch
+        else          noTone(pin);          // 0 = silence
+      }
+      JsonDocument rep; rep["freq"] = freq;
+      String repBody; serializeJson(rep, repBody);
+      HTTPClient rh; rh.begin(String(SERVER) + "/devices/" + deviceId + "/outputs/" + name + "/reported");
+      rh.addHeader("Content-Type","application/json"); rh.PUT(repBody); rh.end();
+    }
   }
 }

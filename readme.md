@@ -169,9 +169,16 @@ with your attached devices given read/write roles just like a plant's.
 The toolkit is built to be adapted. The main extension points:
 
 **Add a sensor.** Edit `plant-server/catalog.js`. If your sensor is read like one that
-already exists (e.g. any analog sensor uses `source: "adc"`), a catalog entry is all you
-need — no other code. If it's a genuinely new *kind* of reading, you add a new `source`
-and a matching branch in the firmware. See the tutorial's "Add your own sensor".
+already exists — any analog sensor uses `source: "adc"`, any on/off input (button, motion,
+touch) uses `source: "digital"` — a catalog entry is all you need, no other code. If it's a
+genuinely new *kind* of reading, you add a new `source` and a matching branch in the
+firmware. See the tutorial's "Add your own sensor".
+
+**Add an output.** Edit `OUTPUT_CATALOG` in `catalog.js` and add a firmware branch for its
+`type`. The toolkit ships with an RGB LED, a single LED, a buzzer, a pump (on/off), a servo
+(angle), and a speaker (tone) — each is a small firmware branch plus a per-type control on
+the device page and in the ritual builder. Use the servo or speaker as a template for an
+output whose value isn't a colour.
 
 **Reskin the interface.** Edit the design tokens at the top of
 `plant-server/public/style.css` — a handful of colour, font, and spacing variables drive

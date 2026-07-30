@@ -184,7 +184,17 @@ async function openRitualPreview(ritualId) {
       if (s.type === 'say')    desc = `<span class="voice-plant">🌱 "${s.text}"</span>`;
       if (s.type === 'ask')    desc = `<span class="voice-plant">❔ "${s.text}"</span><br><span class="muted">answers: ${(s.options||[]).join(', ')}</span>`;
       if (s.type === 'wait')   desc = `<span class="muted">⏳ wait ${Math.round(s.duration_ms/60000)} min</span>`;
-      if (s.type === 'act')    desc = `<span class="muted">💡 set ${s.output} → rgb(${s.color.r},${s.color.g},${s.color.b})</span>`;
+      if (s.type === 'act') {
+        const v = s.color || {};
+        let val;
+        if (v.angle !== undefined)      val = v.angle + '°';
+        else if (v.freq !== undefined)  val = (v.freq > 0 ? v.freq + ' Hz' : 'silent');
+        else if (v.r !== undefined)     val = (v.r + v.g + v.b > 0)
+                                              ? (v.r === 255 && v.g === 255 && v.b === 255 ? 'on' : `rgb(${v.r},${v.g},${v.b})`)
+                                              : 'off';
+        else                            val = '?';
+        desc = `<span class="muted">💡 ${s.output} → ${val}</span>`;
+      }
       if (s.type === 'sense')  desc = `<span class="muted">🔍 if ${s.sensor} ${s.op} ${s.value}</span>`;
       if (s.type === 'tend')   desc = `<span class="voice-plant">🌿 "${s.text}"</span>${s.confirm ? '<br><span class="muted">waits for confirmation</span>' : ''}`;
       if (s.type === 'attend') desc = `<span class="voice-plant">👁 "${s.text}"</span>${s.confirm ? '<br><span class="muted">waits for confirmation</span>' : ''}`;
@@ -407,14 +417,28 @@ function renderTranscript(events) {
 function renderEvent(e) {
   const t = new Date(e.ts).toLocaleTimeString();
   const p = e.payload || {};
-
+  const H = currentUser ? currentUser.name : 'you';
   // the body text is event-specific (emoji + wording)
   let body;
   switch (e.type) {
     case 'say':             body = eventLine('🌱 ' + p.text, 'computer', t); break;
     case 'ask':             body = eventLine('🌱 ' + p.text + '  <span class="muted">(' + (p.options||[]).join(' / ') + ')</span>', 'computer', t); break;
     case 'answer':          body = eventLine('🧑 ' + p.answer, 'human', t); break;
-    case 'act':             body = eventLine('💡 set ' + p.output + ' → rgb(' + p.color.r + ',' + p.color.g + ',' + p.color.b + ')', 'machine', t); break;
+    case 'act': {
+      const v = p.color || {};
+      let val;
+      if (v.angle !== undefined)      val = v.angle + '°';
+      else if (v.freq !== undefined)  val = (v.freq > 0 ? v.freq + ' Hz' : 'silent');
+      else if (v.r !== undefined)     val = (v.r + v.g + v.b > 0)
+                                            ? (v.r === 255 && v.g === 255 && v.b === 255 ? 'on' : `rgb(${v.r},${v.g},${v.b})`)
+                                            : 'off';
+      else                            val = '?';
+      body = eventLine('💡 ' + p.output + ' → ' + val, 'machine', t);
+      chain = p.target === 'human'
+        ? [{type:'machine',name:p.device||'device'}, {type:'human',name:H}]
+        : [{type:'machine',name:p.device||'device'}, {type:'plant',name:p.plant_name||'the plant'}];
+      break;
+    }
     case 'sense':           body = eventLine('📈 ' + p.sensor + ' = ' + p.value + (p.passed!==undefined ? (p.passed?' ✓':' ✗') : ''), 'machine', t); break;
     case 'tend':            body = eventLine('🌿 ' + p.text, 'computer', t); break;
     case 'tend_confirmed':  body = eventLine('🧑 done: <span class="muted">' + p.text + '</span>', 'human', t); break;

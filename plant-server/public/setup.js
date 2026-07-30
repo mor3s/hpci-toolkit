@@ -61,9 +61,15 @@ function allocate(entry) {
   if (entry.pin_kind === 'i2c') return { slot: null };           // shares the bus — nothing to assign
 
   if (entry.pin_kind === 'adc') {
-    const used = config.inputs.filter(i => i.source === 'adc').map(i => i.pin);
+    // both analog (adc) and digital-source inputs occupy an ADC-pool pin
+    const used = config.inputs.filter(i => i.source === 'adc' || i.source === 'digital').map(i => i.pin);
     const free = ADC_POOL.find(p => !used.includes(p));
-    return free === undefined ? { error: 'No free ADC pins left' } : { slot: free };
+    return free === undefined ? { error: 'No free input pins left' } : { slot: free };
+  }
+  if (entry.pin_kind === 'single_out') {                 // one output pin (LED, buzzer)
+    const used = (config.outputs || []).flatMap(o => Object.values(o.pins || {}));
+    const free = OUTPUT_POOL.find(p => !used.includes(p));
+    return free === undefined ? { error: 'No free output pins left' } : { slot: free };
   }
   if (entry.pin_kind === 'ads_channel') {
     const used = config.inputs.filter(i => i.source === 'ads1115').map(i => i.channel);
@@ -96,7 +102,7 @@ async function addSensor() {
   if (!name) return;
 
   const input = { catalog_id: entry.id, name, source: entry.source, interval_ms: entry.interval_ms || 5000 };
-  if (entry.pin_kind === 'adc')         input.pin = result.slot;
+  if (entry.pin_kind === 'adc')         input.pin = result.slot;   // covers adc AND digital (both pin_kind 'adc')
   if (entry.pin_kind === 'ads_channel') { input.channel = result.slot; input.address = entry.address; input.mode = entry.mode; }
   if (entry.pin_kind === 'i2c')         input.address = entry.address;
 
@@ -129,9 +135,16 @@ async function addOutput() {
   const name = prompt('Name this output:', entry.default_name);
   if (!name) return;
 
-  const [r, g, b] = result.slot;                                // the three allocated pins
-  const output = { catalog_id: entry.id, name, type: entry.type, pins: { r, g, b } };
-  output.instruction = entry.instructions.replace('{r}', r).replace('{g}', g).replace('{b}', b);
+  let output;
+  if (entry.pin_kind === 'single_out') {
+    const pin = result.slot;
+    output = { catalog_id: entry.id, name, type: entry.type, pins: { s: pin } };
+    output.instruction = entry.instructions.replace('{pin}', pin);
+  } else {
+    const [r, g, b] = result.slot;
+    output = { catalog_id: entry.id, name, type: entry.type, pins: { r, g, b } };
+    output.instruction = entry.instructions.replace('{r}', r).replace('{g}', g).replace('{b}', b);
+  }
 
   config.outputs.push(output);
   await saveConfig();
@@ -182,10 +195,14 @@ function renderOutputs() {
     list.innerHTML = '<p class="muted">No outputs yet.</p>';
     return;
   }
-  list.innerHTML = config.outputs.map((o, idx) =>
-    `<div class="device">
-       <strong>${o.name}</strong> <span class="muted">(${o.type} · R${o.pins.r} G${o.pins.g} B${o.pins.b})</span>
+  list.innerHTML = config.outputs.map((o, idx) => {
+    const pinLabel = o.pins && o.pins.s !== undefined
+      ? 'GPIO ' + o.pins.s
+      : `R${o.pins.r} G${o.pins.g} B${o.pins.b}`;
+    return `<div class="device">
+       <strong>${o.name}</strong> <span class="muted">(${o.type} · ${pinLabel})</span>
        <button class="back" onclick="removeOutput(${idx})">remove</button>
        <p class="muted" style="margin-top:8px">${o.instruction || ''}</p>
-     </div>`).join('');
+     </div>`;
+  }).join('');
 }

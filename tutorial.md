@@ -24,7 +24,8 @@ board reads them). Both are explained below.
 - A computer with **Node.js v18+** ([nodejs.org](https://nodejs.org)).
 - One or more **ESP32 boards** (the build targets the ESP32-WROOM-32).
 - The **Arduino IDE** with ESP32 board support.
-- Sensors and an RGB LED (see Part 3 for what's supported out of the box).
+- Sensors and outputs to try (see Part 3 for what's supported out of the box — analog
+  sensors, a button, an RGB LED, a single LED, a buzzer, a servo, a speaker, and more).
 
 ### 1.2 Run the server
 ```bash
@@ -108,10 +109,29 @@ Sensors (in `CATALOG`):
 |---|---|---|
 | Soil moisture (capacitive) | `adc` | one analog pin |
 | Potentiometer (dial) | `adc` | one analog pin — a handy human input |
+| Photoresistor (light) | `adc` | one analog pin, divider wiring |
+| Water level | `adc` | one analog pin |
+| Sound level (KY-038 A0) | `adc` | analog loudness, jumpy — activity not a clean level |
+| Heartbeat (HW-487) | `adc` | analog pulse signal |
 | Air & climate (BME680) | `i2c` | one sensor, four readings (temp/humidity/pressure/gas) |
 | Plant bioelectricity (ADS1115) | `ads1115` | differential pair, clipped to a leaf |
+| Button (press) | `digital` | on/off input; posts on change (see below) |
+| Loud-sound trigger (KY-038 D0) | `digital` | fires when sound crosses the module's threshold |
 
-Output (in `OUTPUT_CATALOG`): an **RGB LED** (three PWM pins).
+Outputs (in `OUTPUT_CATALOG`):
+
+| Output | `type` | Notes |
+|---|---|---|
+| RGB LED | `rgb` | three PWM pins, a colour |
+| LED (single) | `led` | one pin, on/off |
+| Buzzer | `buzzer` | one pin, on/off |
+| Water pump | `pump` | one pin, on/off (needs a driver + care) |
+| Servo (SM-S2309S / SG90) | `servo` | one pin, an angle 0–180° (needs `ESP32Servo`) |
+| Speaker (tone) | `speaker` | one pin, a frequency in Hz (`tone()`); volume is set in hardware — a series resistor for fixed volume, or a series potentiometer for an adjustable knob |
+
+**Two input styles.** Analog sensors (`adc`, `ads1115`, `i2c`) are *levels* — the board samples them on each sensor's `interval_ms`. Digital sensors (`source: "digital"` — button, sound-trigger) are *events* — the board watches them continuously and posts the instant they change (plus a periodic heartbeat), so a quick press is never missed. Adding any digital on/off input (a PIR, a reed switch, a touch pad) reuses the one `digital` firmware branch.
+
+**Output values beyond colour.** An output's desired value is arbitrary JSON, so different outputs carry different values: RGB carries `{r,g,b}`, a servo `{angle}`, a speaker `{freq}`, and on/off outputs (led/buzzer/pump) are driven as white (on) / black (off). The device page and the ritual builder show the right control per output type (colour picker, angle slider, frequency slider, or on/off).
 
 ---
 
@@ -228,10 +248,26 @@ same addition. The catalog says "offer this, call it `bh1750`"; the firmware say
 you see `bh1750`, read it like this." Match the `source` string in both and they connect.
 
 ### 4.5 Add an output (actuator)
-Outputs live in `OUTPUT_CATALOG`. The RGB LED is `type: "rgb"`, `pin_kind: "rgb"` (three
-PWM pins). A new *kind* of output (say a relay) needs a new `type` + a firmware branch
-that drives it, same two-halves rule. Output pins come from the pool
-`25, 26, 27, 16, 17, 18, 19, 23` (PWM-capable, clear of the I2C pins 21/22).
+Outputs live in `OUTPUT_CATALOG`. There are two pin shapes: `pin_kind: "rgb"` (three PWM
+pins, e.g. the RGB LED) and `pin_kind: "single_out"` (one pin, e.g. LED, buzzer, servo,
+speaker). A new *kind* of output needs a `type`, a `pin_kind`, and a firmware branch that
+drives it — the same two-halves rule as sensors (catalog entry + firmware handler, matched
+by the `type` string). Output pins come from the pool `25, 26, 27, 16, 17, 18, 19, 23`
+(PWM-capable, clear of the I2C pins 21/22).
+
+**What value does it carry?** The desired/reported value is arbitrary JSON, so each output
+type carries whatever it needs: RGB carries `{r,g,b}`, a servo `{angle}`, a speaker
+`{freq}`, on/off outputs are driven as white/black. When you add an output whose value
+isn't a colour, three places learn its shape: the firmware branch (reads the value, drives
+the pin), the device-page control in `device.js` (`outputControlFor` — a slider, toggle,
+etc.), and the ritual builder's `act` block in `builder.js` (the value-control shown once
+that output is chosen). Use the servo or speaker as a template — each is one small branch
+in each of those three places.
+
+**A note on volume (speaker).** The ESP32 can't cleanly set a plain speaker's volume in
+software (a digital pin is on or off). The toolkit controls *pitch* (`tone()`); for
+*volume*, use hardware — a series resistor for a fixed lower volume, or a series
+potentiometer for an adjustable knob. No code change; purely wiring.
 
 ---
 

@@ -62,15 +62,39 @@ async function loadOutputControl() {
     html += `<p class="muted">🔒 Controlled by someone else — you can watch but not change it.</p>`;
   }
 
-  // one colour picker per output — disabled unless the lock is yours
+  // one control per output, appropriate to its type — disabled unless the lock is yours
   for (const o of outputs) {
     html += `<div class="device">
-      <strong>${o.name}</strong><br>
-      <input type="color" ${isMine ? '' : 'disabled'} onchange="setColor('${o.name}', this.value)">
+      <strong>${o.name}</strong> <span class="muted">${o.type}</span><br>
+      ${outputControlFor(o, isMine)}
       <span class="muted" id="status_${o.name}"></span>
     </div>`;
   }
   box.innerHTML = html;
+}
+
+// the right control for an output's type: colour picker for rgb, on/off for the rest
+function outputControlFor(o, isMine) {
+  const dis = isMine ? '' : 'disabled';
+  if (o.type === 'rgb') {
+    return `<input type="color" ${dis} onchange="setColor('${o.name}', this.value)">`;
+  }
+  if (o.type === 'servo') {
+    return `<input type="range" min="0" max="180" value="90" ${dis}
+              oninput="document.getElementById('sv_${o.name}').textContent=this.value"
+              onchange="setAngle('${o.name}', this.value)">
+            <span id="sv_${o.name}" class="muted">90</span>°`;
+  }
+  if (o.type === 'speaker') {
+    return `<input type="range" min="0" max="2000" value="0" ${dis}
+              oninput="document.getElementById('fq_${o.name}').textContent=this.value"
+              onchange="setFreq('${o.name}', this.value)">
+            <span id="fq_${o.name}" class="muted">0</span> Hz`;
+  }
+  // led / buzzer / pump
+  return `
+    <button ${dis} onclick="setOnOff('${o.name}', true)">on</button>
+    <button ${dis} onclick="setOnOff('${o.name}', false)">off</button>`;
 }
 
 async function claim() {
@@ -122,7 +146,45 @@ function hexToRgb(hex) {
     b: parseInt(hex.slice(5, 7), 16)
   };
 }
+// on/off outputs (led/buzzer/pump) — sent as white (on) or black (off) under the hood,
+// so the firmware's "non-black = on" logic and the {r,g,b} desired format are unchanged.
+async function setOnOff(name, on) {
+  const color = on ? { r: 255, g: 255, b: 255 } : { r: 0, g: 0, b: 0 };
+  const res = await fetch('/devices/' + currentDevice + '/outputs/' + name + '/desired', {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ user_id: currentUser.id, color })
+  });
+  const status = document.getElementById('status_' + name);
+  if (!res.ok) { status.textContent = 'failed'; return; }
+  status.textContent = on ? 'turning on…' : 'turning off…';
+  setTimeout(() => confirmOnOff(name, on), 1500);
+}
 
+async function confirmOnOff(name, wantedOn) {
+  const states = await (await fetch('/devices/' + currentDevice + '/outputs/state')).json();
+  const st = states.find(s => s.output_name === name);
+  const r = st && st.reported;
+  const actuallyOn = r && (r.r + r.g + r.b) > 0;
+  document.getElementById('status_' + name).textContent =
+    (actuallyOn === wantedOn) ? (wantedOn ? '✓ on' : '✓ off') : '⚠ no confirmation';
+}
+
+async function setAngle(name, angle) {
+  const res = await fetch('/devices/' + currentDevice + '/outputs/' + name + '/desired', {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ user_id: currentUser.id, color: { angle: Number(angle) } })
+  });
+  const status = document.getElementById('status_' + name);
+  status.textContent = res.ok ? ('→ ' + angle + '°') : 'failed';
+}
+async function setFreq(name, freq) {
+  const res = await fetch('/devices/' + currentDevice + '/outputs/' + name + '/desired', {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ user_id: currentUser.id, color: { freq: Number(freq) } })
+  });
+  const status = document.getElementById('status_' + name);
+  status.textContent = res.ok ? (freq > 0 ? '♪ ' + freq + ' Hz' : 'silent') : 'failed';
+}
 // ============================================================================
 //  NAVIGATION + SENSOR PICK
 // ============================================================================

@@ -143,7 +143,7 @@ async function confirmDevices() {
       const cfg = await (await fetch('/devices/' + d.device_id + '/config')).json();
       (cfg.inputs || []).forEach(i => sensors.push({ name: i.name, device_id: d.device_id, interval_ms: i.interval_ms }));
       if (d.target_type !== 'environment')
-        (cfg.outputs || []).forEach(o => outputs.push({ name: o.name, device_id: d.device_id }));
+        (cfg.outputs || []).forEach(o => outputs.push({ name: o.name, device_id: d.device_id, type: o.type }));
     }
     const key = p.isSelf ? 'self' : 'p' + pid;
     draft.plantIO[key] = { sensors, outputs, name: p.name, isSelf: !!p.isSelf };
@@ -174,7 +174,7 @@ function addStep() {
   if (type === 'say')    Object.assign(base, { text: '' });
   if (type === 'ask')    Object.assign(base, { text: '', options: '', timeout_min: 0, answer_routes: {}, branching: false, open: false });
   if (type === 'wait')   Object.assign(base, { minutes: 1 });
-  if (type === 'act')    Object.assign(base, { plant: '', output: '', device: '', color: '#00ff00' });
+  if (type === 'act')   Object.assign(base, { plant: '', output: '', device: '', color: '#00ff00', angle: 90, on: true, freq: 440 });
   if (type === 'sense')  Object.assign(base, { plant: '', sensor: '', device: '', op: '<', value: 0, then: '', else: '' });
   if (type === 'tend')   Object.assign(base, { plant: '', text: '' });              // always confirmed
   if (type === 'attend') Object.assign(base, { plant: '', text: '', open: false }); // open=false → "done" button; open=true → text
@@ -243,14 +243,44 @@ function renderSteps() {
         <label>Wait for (minutes)</label>
         <input type="number" value="${s.minutes}" oninput="editStep('${s.id}','minutes',this.value)">`;
 
-    if (s.type === 'act')
+    if (s.type === 'act') {
+      const io = draft.plantIO && draft.plantIO[s.plant];
+      const chosen = io && io.outputs.find(o => o.name === s.output);
+      const type = chosen ? chosen.type : null;
+
+      let valueControl = '';
+      if (type === 'servo') {
+        valueControl = `
+          <label>Move to angle</label>
+          <input type="range" min="0" max="180" value="${s.angle}"
+                 oninput="editStep('${s.id}','angle',this.value); document.getElementById('ang_${s.id}').textContent=this.value">
+          <span id="ang_${s.id}" class="muted">${s.angle}</span>°`;
+      } else if (type === 'speaker') {
+        valueControl = `
+          <label>Play tone (0 = silent)</label>
+          <input type="range" min="0" max="2000" value="${s.freq}"
+                 oninput="editStep('${s.id}','freq',this.value); document.getElementById('fq_${s.id}').textContent=this.value">
+          <span id="fq_${s.id}" class="muted">${s.freq}</span> Hz`;
+      } else if (type === 'rgb') {
+        valueControl = `
+          <label>Colour</label>
+          <input type="color" value="${s.color}" oninput="editStep('${s.id}','color',this.value)">`;
+      } else if (type) {
+        valueControl = `
+          <label>Set to</label>
+          <select onchange="editStep('${s.id}','on',this.value === 'on')">
+            <option value="on"  ${s.on ? 'selected' : ''}>on</option>
+            <option value="off" ${!s.on ? 'selected' : ''}>off</option>
+          </select>`;
+      }
+
       fields = `
         <label>Act on</label>
         ${plantDropdown(s)}
-        <label>Turn on which light / output</label>
+        <label>Which output</label>
         ${ioDropdown(s, 'output')}
-        <label>Colour</label>
-        <input type="color" value="${s.color}" oninput="editStep('${s.id}','color',this.value)">`;
+        ${valueControl}`;
+    }
 
     if (s.type === 'sense')
       fields = `
@@ -363,6 +393,7 @@ function pickIO(stepId, field, value) {
   const match = list.find(x => x.name === value);
   s.device = match ? match.device_id : '';
   if (field === 'sensor' && match && match.interval_ms) s.min_recheck_ms = match.interval_ms;
+  if (field === 'output') renderSteps();     // NEW: re-render so the value control matches the output type
 }
 
 function nextDropdown(step, field) {
@@ -535,10 +566,16 @@ function compileDraft() {
     }
     if (s.type === 'act') {
       const alias = Object.keys(draft.devices).find(a => draft.devices[a].device_id === s.device);
-      out.device = alias; out.output = s.output;
-      out.color = hexToRgb(s.color); out.next = sid(s.next);
+      out.device = alias; out.output = s.output; out.next = sid(s.next);
       const io = draft.plantIO[s.plant];
-      out.target = io && io.isSelf ? 'human' : 'plant';       // NEW
+      const chosen = io && io.outputs.find(o => o.name === s.output);
+      const type = chosen ? chosen.type : 'rgb';
+      if (type === 'servo')        out.color = { angle: Number(s.angle) };
+      else if (type === 'speaker') out.color = { freq: Number(s.freq) };
+      else if (type === 'rgb')     out.color = hexToRgb(s.color);
+      else                         out.color = s.on ? { r:255,g:255,b:255 } : { r:0,g:0,b:0 };
+      out.output_type = type;
+      out.target = io && io.isSelf ? 'human' : 'plant';
       out.plant_name = io ? io.name : '';
       out.device_name = s.device;
     }

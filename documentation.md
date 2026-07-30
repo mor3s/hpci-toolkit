@@ -343,14 +343,26 @@ WiFi SSID/password, server address, device id.
 
 **Boot:** start I2C (SDA 21, SCL 22); try to init the BME680 (0x77) and ADS1115 (0x48),
 setting `bmeReady`/`adsReady` so the same binary runs on boards with different hardware;
-connect WiFi; fetch config; attach PWM for RGB outputs.
+connect WiFi; fetch config; attach PWM for RGB outputs, `pinMode` for single-pin on/off
+outputs, and attach servos (`ESP32Servo`).
 
-**Loop:** for each configured input, check its `interval_ms` and read if due, dispatching
-by `source` (`adc` → analogRead; `ads1115` → differential mV; `i2c`/BME → four named
-readings); batch-POST to `/readings`. About once a second, GET desired outputs, drive the
-RGB PWM, and PUT reported state.
+**Loop — inputs by kind:**
+- *Analog/level* (`adc` → analogRead; `ads1115` → differential mV; `i2c`/BME → four named
+  readings) are sampled on each input's `interval_ms` and batch-POSTed.
+- *Digital/event* (`source: "digital"` — button, sound-trigger) are watched **every pass**
+  and POSTed the instant the pin changes (edge-detected), plus a periodic heartbeat so a
+  missed edge self-corrects. This is why a quick button press is never lost: digital inputs
+  are event-driven, not clock-sampled. One `digital` branch serves any on/off input.
 
-Adding a new sensor `source` = a new branch in the read dispatch (see §9).
+**Loop — outputs:** about once a second, GET the desired outputs and drive each by `type`:
+`rgb` → three PWM channels from `{r,g,b}`; `led`/`buzzer`/`pump` → single pin HIGH/LOW
+("non-black = on", so the app sends white/black); `servo` → `{angle}` via the servo library;
+`speaker` → `{freq}` via `tone()` (0 = silent). Each PUTs its reported state back. The
+desired value is arbitrary JSON, so different output types carry different shapes
+(`{r,g,b}` / `{angle}` / `{freq}`) over the same channel.
+
+Adding a new sensor `source`, or a new output `type`, = a new branch here plus a catalog
+entry (see §9).
 
 ---
 
@@ -381,15 +393,21 @@ families, a spacing scale). Reskinning is editing those.
 
 ## 9. Extension points (adapting the toolkit)
 
-- **Add a sensor** → `catalog.js`. Reusing an existing `source` (e.g. `adc`) is
-  catalog-only; a new `source` also needs a firmware read-branch. `source` = how the
-  firmware reads it; `pin_kind` = how the allocator assigns pins (`adc`/`ads_channel`/
-  `i2c`/`rgb`). Pin pools live in `setup.js` (ADC1-only: 32/33/34/35/36/39; outputs:
-  25/26/27/16/17/18/19/23; I2C on 21/22).
+- **Add a sensor** → `catalog.js`. Reusing an existing `source` (`adc` for any analog
+  sensor, `digital` for any on/off input) is catalog-only; a genuinely new `source` also
+  needs a firmware read-branch. `source` = how the firmware reads it; `pin_kind` = how the
+  allocator assigns pins (`adc` — used by both analog and digital inputs; `ads_channel`;
+  `i2c`; `rgb`; `single_out`). Pin pools live in `setup.js` (ADC1-only: 32/33/34/35/36/39;
+  outputs: 25/26/27/16/17/18/19/23; I2C on 21/22).
 - **Add an output** → `OUTPUT_CATALOG` in `catalog.js` + a firmware branch for its `type`.
+  Single-pin outputs use `pin_kind: "single_out"` (stored as `pins:{s}`); RGB uses `"rgb"`
+  (`pins:{r,g,b}`). If the output's value isn't a colour (a servo's `{angle}`, a speaker's
+  `{freq}`), also add its control to `device.js` (`outputControlFor`) and the builder's
+  `act` block (`builder.js`) — three small branches, template off the servo/speaker.
 - **Add a ritual step type** → a `case` in `rituals-engine.js` (behaviour), rendering +
-  compile in `builder.js`, and relationship encoding in `rituals.js` (transcript, diagram,
-  swimlane). Template off `say`.
+  compile in `builder.js`, and relationship encoding in `rituals.js` (via
+  `eventRelationships` for the transcript + swimlane; `relationText`/`previewChain` for the
+  diagram + preview). Template off `say`.
 - **Reskin** → the design tokens atop `style.css`.
 - **Reword** → plain strings in `public/*.js` and `index.html`.
 - **Change board** → the pin pools in `setup.js` + the firmware, kept in sync.
